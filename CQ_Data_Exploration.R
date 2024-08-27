@@ -1,3 +1,5 @@
+# Some data exploration: Can run after running CQ_wrangling.R/ CQ_Sidney.R
+
 # Load necessary libraries
 librarian::shelf(tidyverse, dplyr, ggplot2, tidyr)
 
@@ -80,18 +82,17 @@ average_slope_data <- cq_data %>%
   summarize(average_slope = mean(slope, na.rm = TRUE)) %>%
   ungroup()
 
+# Verify the structure of average_slope_data
+str(average_slope_data)
+
 # Join the average slope data back to the original dataset
 cq_data <- cq_data %>%
   left_join(average_slope_data, by = c("Stream_Name", "variable"))
 
-# Step 4: Calculate p-values and classify significance ----
+# Step 4: Categorize the average slope and plot CQ for each Stream_Name and variable ----
+# CQ for All data ----
+# Calculate p-values and classify significance
 cq_data <- cq_data %>%
-  mutate(slope_category = case_when(
-    average_slope > 0.1 ~ "Mobilizing (> 0.1)",
-    average_slope <= 0.1 & average_slope >= -0.1 ~ "Chemostatic (-0.1 to 0.1)",
-    average_slope < -0.1 ~ "Diluting (< -0.1)",
-    TRUE ~ "NA"
-  )) %>%
   group_by(Stream_Name, variable) %>%
   mutate(
     p_value = tryCatch({
@@ -110,59 +111,54 @@ cq_data <- cq_data %>%
   ) %>%
   ungroup()
 
-# Step 5: Plotting the data ----
-# Plotting the data with black lines for significant relationships ----
-cq_plot <- ggplot(cq_data, aes(x = Qcms, y = value, color = slope_category)) +
-  geom_point(alpha = 0.6, size = 1) +  # Points colored by slope category
-  geom_smooth(
-    data = cq_data , 
-    method = "lm", se = FALSE, 
-    aes(linetype = significant), 
-    color = "black",  # Set the line color to black
-    size = .5  # Line thickness
-  ) +  # Add linear regression lines only for significant relationships
-  scale_x_log10() +  # Logarithmic scale for discharge
-  scale_y_log10() +  # Logarithmic scale for concentration
-  facet_grid(Stream_Name ~ variable, scales = "free") +  # Facet by Stream_Name and variable
-  scale_color_manual(
-    values = c(
-      "Mobilizing (> 0.1)" = "#66C2A5",  # Muted Green
-      "Chemostatic (-0.1 to 0.1)" = "#FC8D62",  # Muted Orange
-      "Diluting (< -0.1)" = "#8DA0CB",  # Muted Blue
-      "NA" = "grey"  # NA values as grey
-    )
-  ) +
-  scale_linetype_manual(
-    values = c(
-      "Mobilizing Significant" = "solid",
-      "Diluting Significant" = "solid",
-      "Chemostatic Significant" = "solid"
-    )
-  ) +
-  labs(
-    x = "Discharge (Q)",
-    y = "Concentration (C)",
-    color = "C-Q Behavior",  # Legend title for color
-    linetype = "Significance"  # Legend title for line type
-  ) +
-  theme_minimal() +
-  theme(
-    legend.text = element_text(size = 12), 
-    legend.title = element_text(size = 14),  
-    legend.key.size = unit(1, "lines"),  
-    legend.key.height = unit(1, "lines"),
-    legend.position = "right",
-    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+# Create a table with the start and end date of each variable from each site
+date_range_table <- cq_data %>%
+  group_by(Stream_Name, variable) %>%
+  summarize(
+    start_date = min(Date, na.rm = TRUE),  # Find the earliest date
+    end_date = max(Date, na.rm = TRUE)     # Find the latest date
+  ) %>%
+  ungroup()  # Ungroup to avoid any unintended grouping in subsequent operations
+
+# Find the common start time and end time across all sites and solutes
+common_date_range <- cq_data %>%
+  group_by(Stream_Name, variable) %>%
+  summarize(
+    start_date = min(Date, na.rm = TRUE),  # Find the earliest date for each site and solute
+    end_date = max(Date, na.rm = TRUE)     # Find the latest date for each site and solute
+  ) %>%
+  ungroup() %>%
+  summarize(
+    common_start_date = max(start_date, na.rm = TRUE),  # Find the latest of the earliest dates
+    common_end_date = min(end_date, na.rm = TRUE)       # Find the earliest of the latest dates
   )
 
-# Print the plot
-print(cq_plot)
+# Print the common date range
+print(common_date_range)
 
-# Save the plot
-ggsave(
-  filename = "cq_plot_ALL.png",       
-  plot = cq_plot,             
-  width = 10,                 
-  height = 8,                
-  dpi = 300                  
-)
+# Find the start and end dates for each site and solute
+date_range_table <- cq_data %>%
+  group_by(Stream_Name, variable) %>%
+  summarize(
+    start_date = min(Date, na.rm = TRUE),  # Find the earliest date
+    end_date = max(Date, na.rm = TRUE)     # Find the latest date
+  ) %>%
+  ungroup()
+
+# Print the table
+print(date_range_table)
+
+# Find the latest start date (limiting start) and earliest end date (limiting end)
+limiting_start <- date_range_table %>%
+  filter(start_date == max(start_date, na.rm = TRUE))
+
+limiting_end <- date_range_table %>%
+  filter(end_date == min(end_date, na.rm = TRUE))
+
+# Print the limiting factors
+print("Limiting Start Date Factor:")
+print(limiting_start)
+
+print("Limiting End Date Factor:")
+print(limiting_end)
+
