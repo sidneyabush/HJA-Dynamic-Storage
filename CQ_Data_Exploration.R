@@ -13,7 +13,7 @@ file_name <- paste0("HJA_CQ_merged_slopes_", Sys.Date(), ".csv")
 cq_data <- read.csv(file.path(main_folder_path, file_name)) %>%
   dplyr::select(Stream_Name, Date, Qcms, variable, value, slope) %>%  # Adjust column names as needed
   dplyr::mutate(Date = as.Date(Date)) %>%
-  dplyr::filter(!variable %in% c("pH", "spc"))  # Replace with the variables you want to remove
+  dplyr::filter(!variable %in% c("pH", "spc"))  # Replace with additional variables you want to remove
 
 # Create a table with the start and end date of each variable from each site
 date_range_table <- cq_data %>%
@@ -64,7 +64,6 @@ print(top_limiting_end)
 
 # Create two additional .csv files: 
 # One with data filtered by common date range that has all sites WITHIN the Lookout Creek Watershed (1,2,3,6,7,8,LOOK,MACK)
-# Define the sites within the Lookout Creek Watershed
 lookout_creek_sites <- c("GSWS01", "GSWS02", "GSWS03", "GSWS06", "GSWS07", "GSWS08", "GSLOOK", "GSMACK")
 
 # Filter the date range table to include only Lookout Creek sites
@@ -84,7 +83,7 @@ lookout_creek_common_date_range <- lookout_creek_date_range_table %>%
   )
 
 # Filter the dataset by the common date range specific to Lookout Creek sites
-filtered_cq_data_lookout <- cq_data %>%
+cq_data_lookout_filtered <- cq_data %>%
   # Filter by the common date range specific to Lookout Creek sites
   filter(
     Date >= lookout_creek_common_date_range$common_start_date,
@@ -93,12 +92,10 @@ filtered_cq_data_lookout <- cq_data %>%
   # Filter to include only sites within the Lookout Creek Watershed
   filter(Stream_Name %in% lookout_creek_sites)
 
-# Check the filtered Lookout Creek dataset
-print(filtered_cq_data_lookout)
+write.csv(cq_data_lookout_filtered, file = file.path(main_folder_path, "cq_data_lookout_filtered.csv"), row.names = FALSE)
 
 
 # Now perform the same operations for all sites
-
 # Calculate the common date range for all variables across all sites
 common_date_range_all_sites <- date_range_table %>%
   group_by(variable) %>%
@@ -112,12 +109,12 @@ common_date_range_all_sites <- date_range_table %>%
   )
 
 # Filter the dataset by the common date range for all sites
-filtered_cq_data_all_sites <- cq_data %>%
+cq_data_all_filtered <- cq_data %>%
   # Filter by the common date range for all sites
   filter(
     Date >= common_date_range_all_sites$common_start_date,
     Date <= common_date_range_all_sites$common_end_date
   )
 
-# Check the filtered dataset for all sites
-print(filtered_cq_data_all_sites)
+write.csv(cq_data_all_filtered, file = file.path(main_folder_path, "cq_data_all_filtered.csv"), row.names = FALSE)
+
