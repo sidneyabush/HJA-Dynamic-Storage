@@ -1,5 +1,5 @@
 # Load necessary libraries
-librarian::shelf(tidyverse, dplyr, ggplot2, tidyr, lubridate)
+librarian::shelf(tidyverse, dplyr, ggplot2, tidyr, lubridate, zoo)
 
 # Clear environment
 rm(list = ls())
@@ -54,10 +54,17 @@ process_cq_data <- function(cq_data, site_order) {
   slope_data <- slope_data %>%
     filter(!is.na(slope), !is.na(variable))
   
+  # Calculate 5-year moving average of the slope
+  slope_data <- slope_data %>%
+    group_by(Stream_Name, variable, Season) %>%
+    arrange(Year) %>%
+    mutate(moving_avg_slope = rollmean(slope, k = 5, fill = NA, align = "center")) %>%
+    ungroup()
+  
   return(slope_data)
 }
 
-# Step 3: Plotting function for yearly slope points by site (all seasons on the same plot) ----
+# Step 3: Plotting function for yearly slope points and moving average by site (all seasons on the same plot) ----
 plot_slope_by_site <- function(slope_data, site, dataset_type) {
   # Filter the data by site
   site_data <- slope_data %>%
@@ -69,10 +76,10 @@ plot_slope_by_site <- function(slope_data, site, dataset_type) {
     return(NULL)
   }
   
-  # Create the plot (slope points for each year)
+  # Create the plot (slope points for each year and moving average)
   slope_plot <- ggplot(site_data, aes(x = Year, y = slope, color = Season)) +
-    geom_point(size = 2, alpha = 0.8) +  
-    geom_line()+
+    geom_point(size = 2, alpha = 0.8) +  # Points for each year, colored by season
+    geom_line(aes(y = moving_avg_slope, group = Season, linetype = Season), size = 1) +  # Moving average line
     facet_wrap(~ variable, scales = "free_y", ncol = 2) +  # Facet by variable
     scale_color_manual(
       values = c(
@@ -86,7 +93,8 @@ plot_slope_by_site <- function(slope_data, site, dataset_type) {
       title = paste("C-Q Slope Over Time for", dataset_type, "at", site),
       x = "Year",
       y = "Slope (b)",
-      color = "Season"
+      color = "Season",
+      linetype = "Season"
     ) +
     theme_minimal() +
     theme(
@@ -104,7 +112,7 @@ plot_slope_by_site <- function(slope_data, site, dataset_type) {
   print(slope_plot)
   
   # Save the plot
-  filename <- paste0("slope_over_time_", site, "_all_seasons.png")
+  filename <- paste0("slope_over_time_", site, "_all_seasons_moving_avg.png")
   ggsave(
     filename = filename,       
     plot = slope_plot,             
@@ -117,7 +125,7 @@ plot_slope_by_site <- function(slope_data, site, dataset_type) {
 # Step 4: Process the data ----
 slope_data <- process_cq_data(cq_all, all_sites_order)
 
-# Step 5: Plot the slope over time for each site, combining all seasons ----
+# Step 5: Plot the slope over time for each site, combining all seasons and showing moving average ----
 for (site in all_sites_order) {
   plot_slope_by_site(slope_data, site, "All Data")
 }
