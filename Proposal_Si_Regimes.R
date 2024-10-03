@@ -1,11 +1,29 @@
-## Adapting HJA post-fire scripts for Jaime's stream chem analysis:
-## Creating Figure 8 PCA with experimental watersheds mixed in with 13 month synoptic sampling:
-
 # Clear environment
 rm(list = ls())
 
-librarian:: shelf(ggpmisc, ggpubr, dplyr, reshape, tidyr, ggalt, GGally, stringr, PCAtools, remotes, TigR, ggstream)
+librarian:: shelf(ggpmisc, ggpubr, dplyr, reshape, tidyr, ggalt, GGally, stringr, PCAtools, remotes, TigR, ggstream,cowplot)
 
+# Set working directory and import data
+setwd("/Users/sidneybush/Library/CloudStorage/Box-Box/Sidney_Bush/HJA_LongTerm_Stream_Chem")
+
+WRTDS_outputs <- read.csv("./Full_Results_WRTDS_kalman_monthly.csv", header = TRUE, na.strings = "n.a.", 
+                          stringsAsFactors = FALSE) %>%
+  filter(LTER == "AND", chemical == "DSi") 
+
+
+# Define the two sites you want to isolate for plotting
+selected_sites <- c("GSWS07", "GSWS10")  # Replace with your actual site names
+
+# Filter the data for the selected sites and add a custom 'Panel' column for labeling
+WRTDS_outputs_filtered <- WRTDS_outputs %>%
+  filter(Stream_Name %in% selected_sites) %>%
+  mutate(Panel = ifelse(Stream_Name == selected_sites[1], "A) GSWS07", "B) GSWS10"))
+
+# Create the custom labels for Panels A and B as a named vector
+custom_labels <- c("A) GSWS07" = "A) WS7", "B) GSWS10" = "B) WS10")
+
+
+## Now add in PCA and create Panel C: 
 # Set working directory and import data
 setwd("/Users/sidneybush/Library/CloudStorage/Box-Box/Sidney_Bush/HJA_LongTerm_Stream_Chem")
 synoptic <- read.csv("./PCA_Full_Sidney.csv", header = TRUE, na.strings = "n.a.", stringsAsFactors = FALSE) %>%
@@ -111,45 +129,69 @@ pca$metadata$Type <- factor(pca$metadata$Type,
                             levels = c("main", "trib", "longterm_up", "longterm_low"),
                             labels = c("Main Stem", "Tributary", "Long-term Upper", "Long-term Lower"))
 
+# Create a small data frame for the labels
+annotation_labels <- data.frame(
+  Panel = c("A) GSWS07", "B) GSWS10"),  # Panel variable values matching your plot facets
+  Month = c(1, 1),  # x positions for the labels (adjust as needed)
+  Conc_mgL = c(12.5, 12.5),  # y positions for the labels (adjust as needed)
+  label = c("A)", "B)")  # Labels to display
+)
+
+# Update the plot with the new facet labels using `geom_text()` for annotations
+panelAB <- ggplot(WRTDS_outputs_filtered, aes(x = Month, y = Conc_mgL, color = Year, group = Year)) +
+  geom_smooth(se = FALSE, method = "loess", linetype = "solid") +  # Apply a smooth line for each year
+  facet_wrap(~ Panel, ncol = 1, scales = "free_y", strip.position = "top", labeller = labeller(Panel = custom_labels)) +  # Use custom labels for panels
+  theme_bw() +
+  labs(x = "Month", y = "Si (mg/L)", color = "Year") +
+  scale_color_gradient(low = "#b3d1ff", high = "#002d70") +  # Light blue to dark blue gradient
+  theme(
+    legend.position = "right",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.text = element_blank(),  # Remove automatic facet labels
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16, face = "bold")
+  ) +
+  # Add custom labels for "A)" and "B)" using `geom_text()` and `inherit.aes = FALSE`
+  geom_text(data = annotation_labels, aes(x = Month, y = Conc_mgL, label = label),
+            size = 7, fontface = "bold", hjust = -0.2, vjust = 1, inherit.aes = FALSE)  # Prevent inheriting from main plot
+
+# Display the updated plot with manual annotations
+panelAB
+
+
+# Generate 13 green shades with a slightly darker light hue
+green_shades <- colorRampPalette(c("#c7e9c0", "#00441b"))(13)
+
+# Update Fig1C with green shades and a manual "C)" label
 Fig1C <- biplot(pca, 
-               showLoadings = TRUE, 
-               colby = "Site", 
-               shape = "Type",
-               pointSize = 6,
-               shapekey = c(17, 15, 15),
-               colkey = c(
-                 "#facba6", 
-                 "#f8b58b", 
-                 "#f59e72", 
-                 "#f2855d", 
-                 "#c1e7ff",
-                 "#abd2ec",
-                 "#94bed9",
-                 "#7faac6",
-                 "#6996b3",
-                 "#5383a1",
-                 "#3d708f",
-                 "#255e7e",
-                 "#004c6d"
-               ),
-               legendPosition = NULL,
-               legendLabSize = NULL,
-               colLegendTitle = NULL,
-               shapeLegendTitle = NULL,
-               legendTitleSize = 16,
-               legendIconSize = 5,
-               sizeLoadingsNames = 5,
-               boxedLoadingsNames = TRUE,
-               fillBoxedLoadings = alpha("white", 1/4),
-               lab = NULL, 
-               ylim = c(-5.5, 3),
-               xlim = c(-5, 4),
-               max.overlaps = Inf, 
-               axisLabSize = 18,
-               titleLabSize = 20,
-               borderWidth = 0.5,
-               borderColour = "gray",
-               subtitle = NULL) +
+                showLoadings = TRUE, 
+                colby = "Site", 
+                shape = "Type",
+                pointSize = 6,
+                shapekey = c(15, 15, 15),
+                colkey = green_shades,  # Replace with green shades
+                legendPosition = NULL,
+                legendLabSize = NULL,
+                colLegendTitle = NULL,
+                shapeLegendTitle = NULL,
+                legendTitleSize = 16,
+                legendIconSize = 5,
+                sizeLoadingsNames = 5,
+                boxedLoadingsNames = TRUE,
+                fillBoxedLoadings = alpha("white", 1/4),
+                lab = NULL, 
+                ylim = c(-5.5, 3),
+                xlim = c(-5, 4),
+                max.overlaps = Inf, 
+                axisLabSize = 16,
+                titleLabSize = 16,
+                borderWidth = 0.5,
+                borderColour = "gray",
+                subtitle = NULL) +
   theme_bw() +
   theme(
     legend.position = "none",
@@ -162,30 +204,22 @@ Fig1C <- biplot(pca,
   ) +
   ggrepel::geom_label_repel(aes(label = pca$metadata$Site, color = pca$metadata$Site), 
                             size = 5,
-                            fontface = "bold",  # Make text bold
+                            fontface = "bold",
                             box.padding = 0.9, 
                             point.padding = 0.8, 
-                            max.overlaps = 30,  # Adjust overlap threshold
+                            max.overlaps = 30,
                             fill = alpha("white", 3),  # White background
                             segment.color = "darkgray") +
   geom_point(aes(color = pca$metadata$Site, shape = pca$metadata$Type), 
-             size = 6) + # Connector line color
-  scale_color_manual(values = c(
-    "#facba6", 
-    "#f8b58b", 
-    "#f59e72", 
-    "#f2855d", 
-    "#c1e7ff",
-    "#abd2ec",
-    "#94bed9",
-    "#7faac6",
-    "#6996b3",
-    "#5383a1",
-    "#3d708f",
-    "#255e7e",
-    "#004c6d"
-  ))
+             size = 6) +
+  scale_color_manual(values = green_shades) +
+  annotate("text", x = -4.9, y = 3, label = "C)", size = 7, hjust = 0, vjust = 1.5, fontface = "bold")
 
-Fig1C
+# Combine Panels A, B, and C using ggarrange
+combined_plot <- ggarrange(panelAB, Fig1C, ncol = 1, heights = c(2, 2.2), align = "hv")
 
-#ggsave("LongTerm_HJA_proposal.png", plot = Fig1C, width = 7, height = 7.5, units = "in")
+# Display the combined plot
+print(combined_plot)
+
+# Save the updated combined plot
+ggsave("LongTerm_HJA_proposal_manual_labels.png", plot = combined_plot, width = 6, height = 10, units = "in")
