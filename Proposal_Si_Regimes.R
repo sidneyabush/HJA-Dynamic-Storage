@@ -12,7 +12,7 @@ WRTDS_outputs <- read.csv("./Full_Results_WRTDS_kalman_monthly.csv", header = TR
 
 
 # Define the two sites you want to isolate for plotting
-selected_sites <- c("GSWS07", "GSWS10")  # Replace with your actual site names
+selected_sites <- c("GSWS08", "GSWS10")  # Replace with your actual site names
 
 # Filter the data for the selected sites and add a custom 'Panel' column for labeling
 WRTDS_outputs_filtered <- WRTDS_outputs %>%
@@ -137,13 +137,17 @@ annotation_labels <- data.frame(
   label = c("A)", "B)")  # Labels to display
 )
 
-# Update the plot with the new facet labels using `geom_text()` for annotations
+# Update the Month variable to use month abbreviations
+WRTDS_outputs_filtered$Month <- factor(WRTDS_outputs_filtered$Month, levels = 1:12, labels = month.abb)
+
+# Modify the plot with month abbreviations on the x-axis and no x-axis label
 panelAB <- ggplot(WRTDS_outputs_filtered, aes(x = Month, y = Conc_mgL, color = Year, group = Year)) +
   geom_smooth(se = FALSE, method = "loess", linetype = "solid") +  # Apply a smooth line for each year
   facet_wrap(~ Panel, ncol = 1, scales = "free_y", strip.position = "top", labeller = labeller(Panel = custom_labels)) +  # Use custom labels for panels
   theme_bw() +
-  labs(x = "Month", y = "Si (mg/L)", color = "Year") +
+  labs(x = NULL, y = "Si (mg/L)", color = "Year") +  # Remove x-axis label
   scale_color_gradient(low = "#b3d1ff", high = "#002d70") +  # Light blue to dark blue gradient
+  scale_x_discrete(breaks = c("Jan", "Apr", "Jul", "Oct"))+
   theme(
     legend.position = "right",
     panel.grid.major = element_blank(),
