@@ -8,11 +8,11 @@ rm(list = ls())
 
 setwd("/Users/sidneybush/Library/CloudStorage/Box-Box/HJA_storm_sampling2020/SBush_data_exploration/Final_Dataset_20240313")
 
-# Open a single PDF file for all plots (this ensures they are saved as separate pages)
-pdf_path <- pdf("/Users/sidneybush/Library/CloudStorage/Box-Box/Sidney_Bush/HJA_LongTerm_Stream_Chem/WS10_Prelim_Plots.pdf", width = 8, height = 10)
-
-# Open the PDF file
-pdf(pdf_path, width = 8, height = 10)
+# # Open a single PDF file for all plots (this ensures they are saved as separate pages)
+# pdf_path <- pdf("/Users/sidneybush/Library/CloudStorage/Box-Box/Sidney_Bush/HJA_LongTerm_Stream_Chem/WS10_Prelim_Plots.pdf", width = 8, height = 10)
+# 
+# # Open the PDF file
+# pdf(pdf_path, width = 8, height = 10)
 
 ## -----------------------------------------
 #### CHEMISTRY - PROPORTIONAL ####
@@ -66,11 +66,11 @@ plot_data <- bind_rows(discharge_data, long_data)
 # Explicitly set "Discharge" to be the first panel manually
 plot_data$Solute <- factor(plot_data$Solute, levels = c("Discharge", "DOC", "CA", "CL", "K", "MG", "NA.", "NO3N", "PO4P", "SO4S"))
 
-# Define the correct PDF path
-pdf_path <- "/Users/sidneybush/Library/CloudStorage/Box-Box/Sidney_Bush/HJA_LongTerm_Stream_Chem/WS10_Prelim_Plots.pdf"
-
-# Open a single PDF file for all plots (this ensures they are saved as separate pages)
-pdf(pdf_path, width = 8, height = 11)
+# # Define the correct PDF path
+# pdf_path <- "/Users/sidneybush/Library/CloudStorage/Box-Box/Sidney_Bush/HJA_LongTerm_Stream_Chem/WS10_Prelim_Plots.pdf"
+# 
+# # Open a single PDF file for all plots (this ensures they are saved as separate pages)
+# pdf(pdf_path, width = 8, height = 11)
 
 ## -----------------------------------------
 #### Update DOC Dates to Show Only 3 Most Recent Years ####
@@ -229,19 +229,45 @@ plot_data_revised <- bind_rows(discharge_data_revised, solutes_data_revised)
 # Ensure "Discharge" is at the top
 plot_data_revised$Panel <- factor(plot_data_revised$Panel, levels = c("Discharge", "Solutes"))
 
-print(
-  ggplot(plot_data_revised, aes(x = DATE, y = Concentration)) +
-    geom_line(data = discharge_data_revised, aes(y = Concentration), color = "gray", size = 1) +
-    geom_line(data = solutes_data_revised, aes(y = Concentration, color = Solute), size = 1) +
-    scale_x_datetime(date_breaks = "3 months", date_labels = "%b %Y") +
-    facet_grid(rows = vars(Panel), scales = "free_y", switch = "y") +
-    theme_bw() +
-    theme(panel.grid = element_blank()) +  # Remove gridlines
-    labs(title = "WS10",
-         x = "Date", y = NULL, color = "Solutes") +
-    theme(legend.position = "bottom")
-)
+library(ggplot2)
 
-# Close the PDF file properly
-dev.off()
+# Define colorblind-friendly palette for specific solutes
+colorblind_palette <- c(
+  "DOC" = "#009E73",
+  "MG" = "#E69F00")
 
+# Ensure Solute column is a factor
+solutes_data_revised$Solute <- as.factor(solutes_data_revised$Solute)
+
+# Rename facet labels
+facet_labels <- c("Solutes" = "Concentration (mg/L)", "Discharge" = "Discharge (cfs)")
+
+# Define the plot
+p <- ggplot(plot_data_revised, aes(x = DATE, y = Concentration)) +
+  geom_line(data = discharge_data_revised, aes(y = Concentration), color = "black", size = 1) +
+  geom_line(data = solutes_data_revised, aes(y = Concentration, color = Solute), size = 1) +
+  scale_x_datetime(date_breaks = "3 months", date_labels = "%b %Y") +
+  scale_color_manual(values = colorblind_palette) +  # Apply colorblind-friendly colors
+  facet_grid(rows = vars(Panel), scales = "free_y", switch = "y", labeller = labeller(Panel = facet_labels)) +
+  theme_bw() +
+  labs(title = "WS10",
+       x = "Date", y = NULL, color = "Solutes") +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(size = 20, face = "bold"),  # Increase title size
+    legend.title = element_blank(),  
+    axis.text = element_text(size = 14),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_text(size = 16),
+    axis.title.x = element_text(vjust = -0.5),  # Move x-axis label down using vjust
+    legend.text = element_text(size = 14),  # Increase legend text size
+    legend.position = c(0.9, 0.4),  # Place legend inside the second panel
+    strip.text = element_text(size = 18, face = "bold")  # Increase facet title text size
+  )
+
+# Display the plot
+print(p)
+
+# Save the plot as a TIFF file
+output_path <- "/Users/sidneybush/Library/CloudStorage/Box-Box/Sidney_Bush/HJA_LongTerm_Stream_Chem/WS10_plot.tiff"
+ggsave(output_path, plot = p, width = 10, height = 8, dpi = 300, units = "in", device = "tiff")
