@@ -4,16 +4,19 @@ library(readr)
 library(ggplot2)
 library(scales)
 
+# Clear environment
 rm(list = ls())
 
+# Directories
 base_dir   <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/03_Data"
 output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs"
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
-# define which sites to include
-sites_keep <- c("GSLOOK","GSWS01","GSWS02","GSWS03","GSWSMC","GSWS06","GSWS07","GSWS08")
+# Only these 8 sites
+sites_keep <- c("GSLOOK","GSWS01","GSWS02","GSWS03",
+                "GSWS06","GSWS07","GSWS08", "GSWSMC")
 
-# Read in drainage area and discharge, but drop GSWS09/10 immediately
+# Read and prep data
 da_df <- read_csv(file.path(base_dir, "Q", "drainage_area.csv"))
 discharge <- read_csv(file.path(base_dir, "Q", "HF00402_v14.csv")) %>%
   filter(WATERYEAR > 1997, SITECODE %in% sites_keep) %>%
@@ -25,7 +28,7 @@ discharge <- read_csv(file.path(base_dir, "Q", "HF00402_v14.csv")) %>%
   ) %>%
   arrange(SITECODE, Date)
 
-# Functions for recession slope and RBFI
+# Function: recession slope + its SE
 calc_recession <- function(df) {
   tmp <- df %>%
     mutate(
@@ -36,18 +39,24 @@ calc_recession <- function(df) {
     filter(!is.na(dQ_dt), change_ratio >= 0.7, dQ < 0) %>%
     mutate(recession_slope = -dQ_dt)
   fit <- lm(recession_slope ~ Q, data = tmp)
-  sm  <- summary(fit)
+  cs  <- summary(fit)$coefficients
   tibble(
-    slope     = coef(fit)[2],
-    p_value   = sm$coefficients[2, 4],
-    r_squared = sm$r.squared
+    slope    = cs[2,1],
+    se_slope = cs[2,2]
   )
 }
+
+# Function: RBFI + its SE (based on daily abs(dQ)/total_Q)
 calc_rbfi <- function(df) {
   tmp <- df %>%
-    mutate(dQ = Q - lag(Q), abs_dQ = abs(dQ)) %>%
-    filter(!is.na(abs_dQ))
-  tibble(RBFI = sum(tmp$abs_dQ) / sum(tmp$Q))
+    mutate(dQ = Q - lag(Q)) %>%
+    filter(!is.na(dQ))
+  total_Q <- sum(df$Q, na.rm = TRUE)
+  props   <- abs(tmp$dQ) / total_Q
+  tibble(
+    RBFI    = sum(abs(tmp$dQ), na.rm = TRUE) / total_Q,
+    se_RBFI = sd(props, na.rm = TRUE) / sqrt(nrow(tmp))
+  )
 }
 
 # Compute annual metrics per site × water year
@@ -58,9 +67,10 @@ annual_metrics <- discharge %>%
     calc_recession(.x),
     calc_rbfi(.x)
   )) %>%
-  bind_rows()
+  bind_rows() %>%
+  mutate(site = factor(site, levels = sites_keep))
 
-# Prepare full‐record recession data
+# Prepare full‐record recession data for curves
 recession_clean <- discharge %>%
   mutate(
     dQ           = Q - lag(Q),
@@ -69,12 +79,12 @@ recession_clean <- discharge %>%
   ) %>%
   filter(!is.na(dQ_dt), change_ratio >= 0.7, dQ < 0) %>%
   transmute(
-    site            = SITECODE,
+    site            = factor(SITECODE, levels = sites_keep),
     Q,
     recession_slope = -dQ_dt
   )
 
-# Compute annotation slopes & positions
+# Annotation: slopes & positions
 slopes_df <- recession_clean %>%
   group_by(site) %>%
   summarise(
@@ -84,52 +94,80 @@ slopes_df <- recession_clean %>%
     .groups   = "drop"
   )
 
-# Site colors & manual ordering 
-palette8 <- c(
-  "#E69F00",  # orange
-  "#56B4E9",  # sky blue
-  "#009E73",  # bluish green
-  "#F0E442",  # yellow
-  "#0072B2",  # blue
-  "#D55E00",  # vermilion
-  "#CC79A7",  # reddish purple
-  "#999999"   # grey
+# Color palette → lighten by 30%
+# New custom palette:
+orig_palette8 <- c(
+  "#B276B2",  # purple
+  "#E87272",  # red
+  "#EF7832",  # orange
+  "#EEC64B",  # yellow
+  "#88B372",  # green
+  "#5FBDA9",  # teal
+  "#87BCE3",  # sky blue
+  "#443A73"   # indigo
 )
-site_cols <- setNames(palette8, sites_keep)
 
-# enforce factor ordering
-annual_metrics <- annual_metrics %>% mutate(site = factor(site, levels = sites_keep))
-recession_clean <- recession_clean   %>% mutate(site = factor(site, levels = sites_keep))
-slopes_df$site <- factor(slopes_df$site, levels = sites_keep)
+# Optional lightening (10% here)
+site_cols <- setNames(lighten(orig_palette8, amount = 0.1), sites_keep)
 
-# 1) Annual RBFI: 4 columns × 2 rows (leave empty for last two)
-p_rbfi <- ggplot(annual_metrics, aes(year, RBFI, color = site, group = site)) +
-  geom_point(size = 1.1) +
-  geom_line(size = 0.7) +
+# 1) Annual RBFI ± SE by site (4 cols × 2 rows)
+p_rbfi <- ggplot(annual_metrics, aes(x = year, y = RBFI, color = site, fill = site)) +
+  geom_ribbon(aes(ymin = RBFI - se_RBFI, ymax = RBFI + se_RBFI),
+              alpha = 0.3, color = NA) +
+  geom_line(size = 0.5) +
+  geom_point(size = 1) +
   facet_wrap(~ site, ncol = 4) +
   scale_color_manual(values = site_cols, guide = FALSE) +
-  labs(x = "Water Year", y = "Richards–Baker Flashiness Index") +
+  scale_fill_manual(values = alpha(site_cols, 0.3), guide = FALSE) +
+  labs(x = "Water Year", y = "Richards Baker Index") +
   theme_classic() +
   theme(
     panel.border     = element_rect(color = "black", fill = NA, size = 1),
     axis.line        = element_blank(),
-    strip.background = element_rect(color = "black", fill = "white", size = 0.5),
+    strip.background = element_rect(
+      fill  = "white",
+      colour = "grey60",   # a much lighter border
+      size   = 0.3         # and very thin
+    ),
     strip.text       = element_text(color = "black")
   )
-ggsave("rbfi_by_site_wy.png", p_rbfi, path = output_dir,
+
+ggsave("rbfi_by_site_wy_se.png", p_rbfi, path = output_dir,
        width = 12, height = 6, units = "in", dpi = 300)
 
-# 2) Recession curve: 5 columns × 2 rows
-p_curve <- ggplot(recession_clean, aes(Q, recession_slope, color = site)) +
+# 2) Annual recession‐curve slope ± SE by site (4 cols × 2 rows)
+p_slope <- ggplot(annual_metrics, aes(x = year, y = slope, color = site, fill = site)) +
+  geom_ribbon(aes(ymin = slope - se_slope, ymax = slope + se_slope),
+              alpha = 0.3, color = NA) +
+  geom_line(size = 0.5) +
+  geom_point(size = 1) +
+  facet_wrap(~ site, ncol = 4) +
+  scale_color_manual(values = site_cols, guide = FALSE) +
+  scale_fill_manual(values = alpha(site_cols, 0.3), guide = FALSE) +
+  labs(x = "Water Year", 
+       y = expression(Recession~Slope~(-dQ/dt)) +
+         theme_classic() +
+  theme(
+    panel.border     = element_rect(color = "black", fill = NA, size = 1),
+    axis.line        = element_blank(),
+    strip.background = element_rect(
+      fill  = "white",
+      colour = "grey60",   # a much lighter border
+      size   = 0.3         # and very thin
+    ),
+    strip.text       = element_text(color = "black")
+  )
+ggsave("recession_slope_by_site_wy_se.png", p_slope, path = output_dir,
+       width = 12, height = 6, units = "in", dpi = 300)
+
+# 3) Recession‐limb curves by site (4 cols × 2 rows)
+p_curve <- ggplot(recession_clean, aes(x = Q, y = recession_slope, color = site)) +
   geom_point(alpha = 0.6, size = 1.2) +
-  geom_smooth(method = "lm", se = FALSE, size = 0.8) +
-  geom_text(
-    data = slopes_df,
-    aes(label = paste0("slope = ", slope)),
-    x = -Inf, y = Inf,
-    hjust = -0.1, vjust = 1.6,
-    size = 3, color = "black"
-  ) +
+  geom_smooth(method = "lm", se = FALSE, size = 0.5) +
+  geom_text(data = slopes_df,
+            aes(label = paste0("slope = ", slope)),
+            x = -Inf, y = Inf, hjust = -0.1, vjust = 1.6,
+            size = 3, color = "black") +
   facet_wrap(~ site, ncol = 4, scales = "free") +
   scale_color_manual(values = site_cols, guide = FALSE) +
   labs(
@@ -140,28 +178,12 @@ p_curve <- ggplot(recession_clean, aes(Q, recession_slope, color = site)) +
   theme(
     panel.border     = element_rect(color = "black", fill = NA, size = 1),
     axis.line        = element_blank(),
-    strip.background = element_rect(color = "black", fill = "white", size = 0.5),
+    strip.background = element_rect(
+      fill  = "white",
+      colour = "grey60",   # a much lighter border
+      size   = 0.3         # and very thin
+    ),
     strip.text       = element_text(color = "black")
   )
 ggsave("recession_curve_by_site.png", p_curve, path = output_dir,
-       width = 12, height = 6, units = "in", dpi = 300)
-
-# 3) Annual recession slope vs WY: 5 columns × 2 rows
-p_slope <- ggplot(annual_metrics, aes(year, slope, color = site, group = site)) +
-  geom_point(size = 1.1) +
-  geom_line(size = 0.7) +
-  facet_wrap(~ site, ncol = 4) +
-  scale_color_manual(values = site_cols, guide = FALSE) +
-  labs(
-    x = "Water Year",
-    y = expression(Recession~Slope~(-dQ/dt))
-  ) +
-  theme_classic() +
-  theme(
-    panel.border     = element_rect(color = "black", fill = NA, size = 1),
-    axis.line        = element_blank(),
-    strip.background = element_rect(color = "black", fill = "white", size = 0.5),
-    strip.text       = element_text(color = "black")
-  )
-ggsave("recession_limb_by_site_wy.png", p_slope, path = output_dir,
        width = 12, height = 6, units = "in", dpi = 300)
