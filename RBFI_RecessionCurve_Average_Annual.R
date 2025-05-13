@@ -190,14 +190,15 @@ p_summary <- ggplot(summary_site, aes(x = site, y = mean_val, color = site)) +
                 width = 0.2) +
   facet_wrap(
     ~ metric,
-    scales  = "free_y",
+    scales   = "free_y",
+    ncol     = 1,     # stack panels vertically
     labeller = labeller(metric = c(
       RBFI  = "Richards–Baker Index",
       slope = "Recession Limb Slope"
     ))
   ) +
   scale_color_manual(values = site_cols, guide = FALSE) +
-  labs(x = "Site", y = "Mean ± 1 SD") +
+  labs(x = NULL, y = "Mean ± 1 SD") +
   theme(
     axis.text.x      = element_text(angle = 45, hjust = 1),
     panel.border     = element_rect(color = "black", fill = NA, size = 1),
@@ -207,5 +208,7 @@ p_summary <- ggplot(summary_site, aes(x = site, y = mean_val, color = site)) +
   )
 
 
-ggsave("summary_metrics_by_site.png", p_summary, path = output_dir,
-       width = 10, height = 5, units = "in", dpi = 300)
+
+
+ggsave("MeanSD_RBI_RecessionSlope_by_site.png", p_summary, path = output_dir,
+       width = 5, height = 8, units = "in", dpi = 300)
