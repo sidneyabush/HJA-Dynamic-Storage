@@ -154,7 +154,7 @@ p_slope <- ggplot(annual_metrics, aes(year, slope, color = site, group = site)) 
   scale_color_manual(values = site_cols, guide = FALSE) +
   labs(
     x = "Water Year",
-    y = expression(Recession~Slope~(-dQ/dt~vs~Q))
+    y = expression(Recession~Slope~(-dQ/dt))
   ) +
   theme_classic() +
   theme(
