@@ -3,6 +3,8 @@ library(lubridate)
 library(readr)
 library(ggplot2)
 library(scales)
+library(colorspace)   
+
 
 # Clear environment
 rm(list = ls())
@@ -124,11 +126,7 @@ p_rbfi <- ggplot(annual_metrics, aes(x = year, y = RBFI, color = site, fill = si
   theme(
     panel.border     = element_rect(color = "black", fill = NA, size = 1),
     axis.line        = element_blank(),
-    strip.background = element_rect(
-      fill  = "white",
-      colour = "grey60",   # a much lighter border
-      size   = 0.3         # and very thin
-    ),
+    strip.background = element_rect(fill = "white", colour = NA),
     strip.text       = element_text(color = "black")
   )
 
@@ -145,18 +143,15 @@ p_slope <- ggplot(annual_metrics, aes(x = year, y = slope, color = site, fill = 
   scale_color_manual(values = site_cols, guide = FALSE) +
   scale_fill_manual(values = alpha(site_cols, 0.3), guide = FALSE) +
   labs(x = "Water Year", 
-       y = expression(Recession~Slope~(-dQ/dt)) +
-         theme_classic() +
+       y = expression(Recession~Slope~(-dQ/dt))) +
+  theme_classic() +
   theme(
     panel.border     = element_rect(color = "black", fill = NA, size = 1),
     axis.line        = element_blank(),
-    strip.background = element_rect(
-      fill  = "white",
-      colour = "grey60",   # a much lighter border
-      size   = 0.3         # and very thin
-    ),
+    strip.background = element_rect(fill = "white", colour = NA),
     strip.text       = element_text(color = "black")
   )
+  
 ggsave("recession_slope_by_site_wy_se.png", p_slope, path = output_dir,
        width = 12, height = 6, units = "in", dpi = 300)
 
@@ -178,12 +173,9 @@ p_curve <- ggplot(recession_clean, aes(x = Q, y = recession_slope, color = site)
   theme(
     panel.border     = element_rect(color = "black", fill = NA, size = 1),
     axis.line        = element_blank(),
-    strip.background = element_rect(
-      fill  = "white",
-      colour = "grey60",   # a much lighter border
-      size   = 0.3         # and very thin
-    ),
+    strip.background = element_rect(fill = "white", colour = NA),
     strip.text       = element_text(color = "black")
   )
+
 ggsave("recession_curve_by_site.png", p_curve, path = output_dir,
        width = 12, height = 6, units = "in", dpi = 300)
