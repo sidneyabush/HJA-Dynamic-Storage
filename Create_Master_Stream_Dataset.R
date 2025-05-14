@@ -19,30 +19,36 @@ Q_5min <- read_csv(
 ) %>%
   filter(WATERYEAR > 1997, SITECODE %in% sites_keep) %>%
   mutate(
-    DATE_TIME = as.POSIXct(DATE_TIME,
-                           format = "%Y-%m-%d %H:%M:%S",
-                           tz     = "UTC"),
-    DATE      = as.Date(DATE_TIME),
-    HOUR      = floor_date(DATE_TIME, "hour"),
-    Q         = INST_Q * 0.02831683199881    # convert to m³/s
+    DATE_TIME  = as.POSIXct(DATE_TIME,
+                            format = "%Y-%m-%d %H:%M:%S",
+                            tz     = "UTC"),
+    DATE       = as.Date(DATE_TIME),
+    HOUR       = floor_date(DATE_TIME, "hour"),
+    Q          = INST_Q * 0.02831683199881,    # convert to m³/s
+    WATERYEAR  = if_else(month(DATE) >= 10,
+                         year(DATE) + 1,
+                         year(DATE))
   )
 
 EC_5min <- read_csv(
   file.path(base_dir, "EC", "CF01201_v3.txt"),
   show_col_types = FALSE
 ) %>%
-  filter(WATERYEAR > 1997, SITECODE %in% sites_keep) %>%
   mutate(
-    DATE_TIME = as.POSIXct(DATE_TIME,
-                           format = "%Y-%m-%d %H:%M:%S",
-                           tz     = "UTC"),
-    DATE      = as.Date(DATE_TIME),
-    HOUR      = floor_date(DATE_TIME, "hour")
-  )
+    DATE_TIME  = as.POSIXct(DATE_TIME,
+                            format = "%Y-%m-%d %H:%M:%S",
+                            tz     = "UTC"),
+    DATE       = as.Date(DATE_TIME),
+    HOUR       = floor_date(DATE_TIME, "hour"),
+    WATERYEAR  = if_else(month(DATE) >= 10,
+                         year(DATE) + 1,
+                         year(DATE))) %>%
+  filter(WATERYEAR > 1997, SITECODE %in% sites_keep)
+  
 
-# ── 2) Hourly summaries ──────────────────────────────────────────────────────
+# Hourly summaries ──────────────────────────────────────────────────────
 hourly_Q <- Q_5min %>%
-  group_by(SITECODE, HOUR) %>%
+  group_by(SITECODE, HOUR, WATERYEAR) %>%
   summarize(
     MEAN_Q        = mean(Q,   na.rm = TRUE),
     SD_Q          = sd(Q,     na.rm = TRUE),
@@ -51,7 +57,7 @@ hourly_Q <- Q_5min %>%
   )
 
 hourly_EC_T <- EC_5min %>%
-  group_by(SITECODE, HOUR) %>%
+  group_by(SITECODE, HOUR, WATERYEAR) %>%
   summarize(
     MEAN_EC       = mean(EC_INST,        na.rm = TRUE),
     SD_EC         = sd(EC_INST,          na.rm = TRUE),
@@ -62,25 +68,20 @@ hourly_EC_T <- EC_5min %>%
   )
 
 hourly_data <- hourly_Q %>%
-  left_join(hourly_EC_T, by = c("SITECODE", "HOUR"))
+  left_join(hourly_EC_T, by = c("SITECODE", "HOUR", "WATERYEAR"))
 
-# ── 3) Daily summaries ───────────────────────────────────────────────────────
+# Daily summaries ───────────────────────────────────────────────────────
 daily_Q <- Q_5min %>%
-  group_by(SITECODE, DATE) %>%
+  group_by(SITECODE, DATE, WATERYEAR) %>%
   summarize(
     MEAN_Q        = mean(Q,   na.rm = TRUE),
     SD_Q          = sd(Q,     na.rm = TRUE),
     N_READINGS_Q  = n(),
     .groups       = "drop"
-  ) %>%
-  mutate(
-    WATERYEAR = if_else(month(DATE) >= 10,
-                        year(DATE) + 1,
-                        year(DATE))
   )
 
 daily_EC_T <- EC_5min %>%
-  group_by(SITECODE, DATE) %>%
+  group_by(SITECODE, DATE, WATERYEAR) %>%
   summarize(
     MEAN_EC       = mean(EC_INST,        na.rm = TRUE),
     SD_EC         = sd(EC_INST,          na.rm = TRUE),
@@ -88,16 +89,9 @@ daily_EC_T <- EC_5min %>%
     SD_TEMP       = sd(WATERTEMP_INST,   na.rm = TRUE),
     N_READINGS_T  = n(),
     .groups       = "drop"
-  ) %>%
-  mutate(
-    WATERYEAR = if_else(month(DATE) >= 10,
-                        year(DATE) + 1,
-                        year(DATE))
   )
 
 daily_data <- daily_Q %>%
-  left_join(daily_EC_T, by = c("SITECODE", "DATE"))
+  left_join(daily_EC_T, by = c("SITECODE", "DATE", "WATERYEAR"))
 
-# ── 4) Inspect results ───────────────────────────────────────────────────────
-glimpse(hourly_data)
-glimpse(daily_data)
+
