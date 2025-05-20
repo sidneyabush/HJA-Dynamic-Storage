@@ -50,6 +50,7 @@ combined_met <- Temp %>%
   full_join(RH,     by = c("DATE", "SITECODE")) %>%
   full_join(NetRad, by = c("DATE", "SITECODE")) %>%
   filter(DATE >= ymd("2013-04-17")) %>%
+  filter(DATE <= ymd("2018-09-30")) %>%
   arrange(SITECODE, DATE)
 
 # 1) pivot your master into long form
@@ -83,11 +84,31 @@ long_met <- combined_unique %>%
 #    for each watershed×variable, which site to pull from
 mapping <- tribble(
   ~watershed, ~var,       ~SITECODE,
-  "WS01",     "P_mm_d",   "PRIMET",
-  "WS01",     "T_C",      "PRIMET",
-  "WS01",     "NR_Wm2_d", "PRIMET",
-  "WS01",     "RH_d_pct", "CENMET",
-  # add rows here for WS02, WS03, etc...
+  "GSWS01",     "P_mm_d",   "PRIMET",
+  "GSWS01",     "T_C",      "PRIMET",
+  "GSWS01",     "NR_Wm2_d", "PRIMET",
+  "GSWS01",     "RH_d_pct", "PRIMET",
+  
+  "GSWS02",     "P_mm_d",   "PRIMET",
+  "GSWS02",     "T_C",      "PRIMET",
+  "GSWS02",     "NR_Wm2_d", "PRIMET",
+  "GSWS02",     "RH_d_pct", "PRIMET",
+  
+  "GSWS03",     "P_mm_d",   "PRIMET",
+  "GSWS03",     "T_C",      "PRIMET",
+  "GSWS03",     "NR_Wm2_d", "PRIMET",
+  "GSWS03",     "RH_d_pct", "PRIMET",
+  
+  "GSWS09",     "P_mm_d",   "PRIMET",
+  "GSWS09",     "T_C",      "PRIMET",
+  "GSWS09",     "NR_Wm2_d", "PRIMET",
+  "GSWS09",     "RH_d_pct", "PRIMET",
+  
+  "GSWS10",     "P_mm_d",   "PRIMET",
+  "GSWS10",     "T_C",      "PRIMET",
+  "GSWS10",     "NR_Wm2_d", "PRIMET",
+  "GSWS10",     "RH_d_pct", "PRIMET",
+ 
 )
 
 # 4) join mapping to the long data

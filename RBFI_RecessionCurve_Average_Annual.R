@@ -102,7 +102,7 @@ palette10 <- c(
 )
 site_cols <- setNames(lighten(palette10, amount = 0.1), sites_keep)
 
-# 1) Annual RBFI by site
+# 1) Annual RBI by site
 p_rbfi <- ggplot(annual_metrics, aes(year, RBFI, color = site, fill = site)) +
   geom_line(size = 0.6) +
   geom_point(size = 1) +
@@ -206,8 +206,6 @@ p_summary <- ggplot(summary_site, aes(x = site, y = mean_val, color = site)) +
     strip.background = element_rect(fill = "white", colour = NA),
     strip.text       = element_text(color = "black")
   )
-
-
 
 
 ggsave("MeanSD_RBI_RecessionSlope_by_site.png", p_summary, path = output_dir,
