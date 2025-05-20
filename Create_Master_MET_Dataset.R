@@ -52,18 +52,54 @@ combined_met <- Temp %>%
   filter(DATE >= ymd("2013-04-17")) %>%
   arrange(SITECODE, DATE)
 
-map_df <- tribble(
-  ~SITECODE, ~watershed,
-  "PRIMET",  "GSWS01",
-  "PRIMET",  "GSWS02",
-  "PRIMET",  "GSWS03"
-  # add more mappings for other groups here
+# 1) pivot your master into long form
+long_met <- combined_met %>%
+  pivot_longer(
+    cols      = c(P_mm_d, T_C, RH_d_pct, NR_Wm2_d),
+    names_to  = "var",
+    values_to = "value"
+  )
+
+combined_unique <- combined_met %>%
+  group_by(DATE, SITECODE) %>%
+  summarise(
+    P_mm_d    = mean(P_mm_d,    na.rm = TRUE),
+    T_C       = mean(T_C,       na.rm = TRUE),
+    RH_d_pct  = mean(RH_d_pct,  na.rm = TRUE),
+    NR_Wm2_d  = mean(NR_Wm2_d,  na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# 2) pivot wide → long
+long_met <- combined_unique %>%
+  pivot_longer(
+    cols      = c(P_mm_d, T_C, RH_d_pct, NR_Wm2_d),
+    names_to  = "var",
+    values_to = "value"
+  )
+#  long_met: DATE | SITECODE | var     | value
+
+# 3) define your station-selection mapping:
+#    for each watershed×variable, which site to pull from
+mapping <- tribble(
+  ~watershed, ~var,       ~SITECODE,
+  "WS01",     "P_mm_d",   "PRIMET",
+  "WS01",     "T_C",      "PRIMET",
+  "WS01",     "NR_Wm2_d", "PRIMET",
+  "WS01",     "RH_d_pct", "CENMET",
+  # add rows here for WS02, WS03, etc...
 )
 
-# 2) Join & expand
-combined_expanded <- combined_met %>%
-  # join on SITECODE; each PRIMET row will now match three rows in map_df
-  left_join(map_df, by = "SITECODE") %>%
-  # if you only want the ones you mapped, drop the rest:
-  filter(!is.na(watershed)) %>%
-  arrange(DATE, SITECODE, watershed)
+# 4) join mapping to the long data
+ws_long <- mapping %>%
+  left_join(long_met, by = c("SITECODE","var"))
+#  ws_long: watershed | var | SITECODE | DATE | value
+
+# 5) pivot long → wide per watershed
+combined_by_watershed <- ws_long %>%
+  select(watershed, DATE, var, value) %>%
+  pivot_wider(
+    names_from  = var,
+    values_from = value
+  ) %>%
+  arrange(watershed, DATE)
