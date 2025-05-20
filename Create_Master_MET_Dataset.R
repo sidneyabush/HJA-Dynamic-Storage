@@ -52,3 +52,18 @@ combined_met <- Temp %>%
   filter(DATE >= ymd("2013-04-17")) %>%
   arrange(SITECODE, DATE)
 
+map_df <- tribble(
+  ~SITECODE, ~watershed,
+  "PRIMET",  "GSWS01",
+  "PRIMET",  "GSWS02",
+  "PRIMET",  "GSWS03"
+  # add more mappings for other groups here
+)
+
+# 2) Join & expand
+combined_expanded <- combined_met %>%
+  # join on SITECODE; each PRIMET row will now match three rows in map_df
+  left_join(map_df, by = "SITECODE") %>%
+  # if you only want the ones you mapped, drop the rest:
+  filter(!is.na(watershed)) %>%
+  arrange(DATE, SITECODE, watershed)
