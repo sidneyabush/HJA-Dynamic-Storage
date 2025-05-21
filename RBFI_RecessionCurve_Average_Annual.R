@@ -25,7 +25,7 @@ sites_keep <- c(
 # Read & prep data
 da_df <- read_csv(file.path(base_dir, "Q", "drainage_area.csv"))
 discharge <- read_csv(file.path(base_dir, "Q", "HF00402_v14.csv")) %>%
-  filter(WATERYEAR > 1997, SITECODE %in% sites_keep) %>%
+  #filter(WATERYEAR > 1997, SITECODE %in% sites_keep) %>%
   left_join(da_df, by = "SITECODE") %>%
   filter(!is.na(DA_M2)) %>%
   mutate(

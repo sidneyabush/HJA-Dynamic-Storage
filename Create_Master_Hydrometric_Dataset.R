@@ -1,0 +1,1087 @@
+library(readr)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+
+#############################
+# PART 1: HELPER FUNCTIONS  #
+#############################
+
+# Date parsing function
+parse_my_date <- function(d) {
+  parse_date_time(d,
+                  orders = c("Ymd", "Y-m-d", "mdy", "m/d/Y", "dmy", "d/m/Y")
+  ) %>% as_date()
+}
+
+# Function for loading data that uses _inter columns
+make_inter_long <- function(fname, var) {
+  read_csv(file.path(met_dir, fname), show_col_types = FALSE) %>%
+    mutate(DATE = parse_my_date(DATE)) %>%
+    pivot_longer(
+      cols         = ends_with("_inter"),
+      names_to     = "SITECODE",
+      names_pattern= "(.*)_inter$",     # ← capture everything before "_inter"
+      values_to    = var                # ← e.g. "Temp" or "Precip"
+    )
+}
+
+# Function to read GSMACK precipitation data
+read_mack_precip <- function(fname) {
+  read_csv(file.path(met_dir, fname), show_col_types = FALSE) %>%
+    mutate(DATE = parse_my_date(DATE)) %>%
+    filter(SITECODE == "GSMACK") %>%  # Only keep GSMACK site data
+    select(DATE, SITECODE, PRECIP_TOT_DAY) %>%
+    rename(P_mm_d = PRECIP_TOT_DAY)  # Rename to match your naming convention
+}
+
+# Function for better formatted plots
+create_relationship_plot <- function(data, site1, site2, variable, r_squared, complete_count) {
+  site1_col <- paste0(site1)
+  site2_col <- paste0(site2)
+  
+  p <- ggplot(data, aes_string(x = paste0("`", site1_col, "`"), y = paste0("`", site2_col, "`"))) +
+    geom_point(alpha = 0.6, size = 2) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    ) +
+    labs(title = paste("Relationship for", variable, "between stations"),
+         subtitle = paste(site1, "and", site2, "(n =", complete_count, ")"),
+         x = site1, y = site2) +
+    annotate("text", 
+             x = min(data[[site1_col]], na.rm = TRUE) + 0.8 * (max(data[[site1_col]], na.rm = TRUE) - min(data[[site1_col]], na.rm = TRUE)),
+             y = min(data[[site2_col]], na.rm = TRUE) + 0.1 * (max(data[[site2_col]], na.rm = TRUE) - min(data[[site2_col]], na.rm = TRUE)),
+             label = sprintf("R² = %.3f", r_squared),
+             hjust = 1, 
+             fontface = "bold")
+  
+  return(p)
+}
+
+# Function to create a multiple regression model plot
+# Function to create a multiple regression model plot
+create_multiple_regression_plot <- function(target_site, predictor_sites, variable, model_summary, complete_count) {
+  # Create a base plot title and subtitle
+  title <- paste("Multiple Regression Model for", variable)
+  subtitle <- paste(target_site, "predicted from", paste(predictor_sites, collapse = ", "))
+  
+  # Prepare the actual data used in the model
+  model_data <- environment(model_summary$call)$data
+  
+  # Create a data frame for the model information
+  model_info <- data.frame(
+    Metric = c("R²", "Adjusted R²", "F-statistic", "p-value", "Sample Size"),
+    Value = c(
+      round(model_summary$r.squared, 4),
+      round(model_summary$adj.r.squared, 4),
+      round(model_summary$fstatistic[1], 2),
+      format.pval(
+        pf(model_summary$fstatistic[1], 
+           model_summary$fstatistic[2], 
+           model_summary$fstatistic[3], 
+           lower.tail = FALSE),
+        digits = 3
+      ),
+      complete_count
+    )
+  )
+  
+  # Prepare coefficient information
+  coef_info <- data.frame(
+    Term = rownames(model_summary$coefficients),
+    Estimate = model_summary$coefficients[, "Estimate"],
+    `Std. Error` = model_summary$coefficients[, "Std. Error"],
+    `t value` = model_summary$coefficients[, "t value"],
+    `Pr(>|t|)` = model_summary$coefficients[, "Pr(>|t|)"]
+  )
+  
+  # Create the plot
+  p <- ggplot() +
+    theme_minimal(base_size = 12) +
+    
+    # Model Information Section
+    annotate("text", x = 0.5, y = 0.9, label = title, 
+             fontface = "bold", size = 5, hjust = 0.5) +
+    annotate("text", x = 0.5, y = 0.85, label = subtitle, 
+             fontface = "italic", size = 4, hjust = 0.5) +
+    
+    # Model Metrics Table
+    annotate("text", x = 0.5, y = 0.75, label = "Model Metrics:", 
+             fontface = "bold", size = 4, hjust = 0.5) +
+    annotate("text", x = 0.3, y = 0.7, label = paste(model_info$Metric, collapse = "\n"), 
+             hjust = 1, size = 3) +
+    annotate("text", x = 0.7, y = 0.7, label = paste(model_info$Value, collapse = "\n"), 
+             hjust = 0, size = 3) +
+    
+    # Coefficients Table
+    annotate("text", x = 0.5, y = 0.5, label = "Coefficients:", 
+             fontface = "bold", size = 4, hjust = 0.5) +
+    annotate("text", x = 0.2, y = 0.45, 
+             label = paste(c("Term", coef_info$Term), collapse = "\n"), 
+             hjust = 0, fontface = "bold", size = 3) +
+    annotate("text", x = 0.4, y = 0.45, 
+             label = paste(c("Estimate", round(coef_info$Estimate, 4)), collapse = "\n"), 
+             hjust = 0, size = 3) +
+    annotate("text", x = 0.6, y = 0.45, 
+             label = paste(c("p-value", format.pval(coef_info$`Pr(>|t|)`, digits = 3)), collapse = "\n"), 
+             hjust = 0, size = 3) +
+    
+    # Create a plot area
+    xlim(0, 1) +
+    ylim(0, 1) +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.title = element_blank(),
+      axis.text = element_blank(),
+      axis.ticks = element_blank()
+    ) +
+    labs(title = title, subtitle = subtitle)
+  
+  return(p)
+}
+
+####################################
+# PART 2: DATA PROCESSING FUNCTIONS #
+####################################
+
+# Extract all required station pairs and triplets that need interpolation
+extract_station_groups <- function(site_mapping) {
+  pairs <- list()
+  triplets <- list()
+  
+  for (site in names(site_mapping)) {
+    site_info <- site_mapping[[site]]
+    
+    # Check each variable for groups of stations
+    for (var in c("temp", "precip", "rh", "netrad")) {
+      stations <- site_info[[var]]
+      
+      if (length(stations) == 2) {
+        # This is a pair that needs interpolation
+        pair_name <- paste(stations[1], stations[2], sep = "_")
+        if (!pair_name %in% names(pairs)) {
+          pairs[[pair_name]] <- list(site1 = stations[1], site2 = stations[2])
+        }
+      } else if (length(stations) == 3) {
+        # This is a triplet that needs multiple regression
+        triplet_name <- paste(stations, collapse = "_")
+        if (!triplet_name %in% names(triplets)) {
+          triplets[[triplet_name]] <- list(
+            site1 = stations[1], 
+            site2 = stations[2], 
+            site3 = stations[3]
+          )
+        }
+      }
+    }
+  }
+  
+  return(list(
+    pairs = pairs,
+    triplets = triplets
+  ))
+}
+
+# Extract all unique stations needed
+extract_stations <- function(site_mapping) {
+  stations <- c()
+  
+  for (site in names(site_mapping)) {
+    site_info <- site_mapping[[site]]
+    
+    # Add stations from each variable
+    for (var in c("temp", "precip", "rh", "netrad")) {
+      stations <- c(stations, site_info[[var]])
+    }
+  }
+  
+  return(unique(stations))
+}
+
+# Create a function to interpolate missing values based on linear relationship between two sites
+interpolate_pair <- function(data, site1, site2, variable) {
+  # Filter data for the two sites and check for duplicates
+  check_dupes <- data %>% 
+    filter(SITECODE %in% c(site1, site2)) %>%
+    group_by(DATE, SITECODE) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    filter(n > 1)
+  
+  if(nrow(check_dupes) > 0) {
+    print(paste("Warning: Found", nrow(check_dupes), "duplicate date-site combinations"))
+    print(check_dupes)
+    
+    # Summarize duplicates by taking the mean
+    data <- data %>%
+      group_by(DATE, SITECODE) %>%
+      summarise(across(everything(), mean, na.rm = TRUE), .groups = "drop")
+    
+    print("Duplicates have been averaged")
+  }
+  
+  # Now proceed with the filtered data
+  pair_data <- data %>% 
+    filter(SITECODE %in% c(site1, site2)) %>%
+    select(DATE, SITECODE, !!sym(variable)) %>%
+    pivot_wider(names_from = SITECODE, values_from = !!sym(variable), values_fn = mean)
+  
+  # Create column names
+  site1_col <- paste0(site1)
+  site2_col <- paste0(site2)
+  
+  # Check if there are enough data points to build a model
+  complete_rows <- complete.cases(pair_data[, c(site1_col, site2_col)])
+  complete_count <- sum(complete_rows)
+  
+  if(complete_count < 5) {
+    warning(paste("Not enough complete cases for", site1, "and", site2, "for variable", variable, 
+                  "(only", complete_count, "overlapping records)"))
+    # Return the original data without interpolation
+    return(data)
+  }
+  
+  # Fit linear model using complete cases only
+  model <- lm(formula = paste0("`", site2_col, "` ~ `", site1_col, "`"), 
+              data = pair_data[complete_rows, ])
+  
+  # Get model stats
+  r_squared <- summary(model)$r.squared
+  p_value <- summary(model)$coefficients[2,4]  # p-value for the slope
+  intercept <- coef(model)[1]
+  slope <- coef(model)[2]
+  
+  print(paste("Linear model for", variable, "between", site1, "and", site2, ":"))
+  print(paste("  Formula:", site2, "=", round(intercept, 4), "+", round(slope, 4), "*", site1))
+  print(paste("  R-squared:", round(r_squared, 4)))
+  print(paste("  p-value:", format.pval(p_value, digits = 4)))
+  print(paste("  Sample size:", complete_count, "overlapping records"))
+  
+  # Optional: Visualize relationship
+  plot_data <- pair_data[complete_rows, ]
+  
+  # Create and save a nice looking plot
+  p <- create_relationship_plot(plot_data, site1, site2, variable, r_squared, complete_count)
+  
+  # Print in the console
+  print(p)
+  
+  # Save the plot to a PNG file
+  plot_filename <- file.path(output_dir, "plots", paste0("relationship_", variable, "_", site1, "_", site2, ".png"))
+  ggsave(plot_filename, plot = p, width = 8, height = 6, dpi = 300)
+  
+  # Apply interpolation for site2 where site1 has data but site2 is missing
+  s1_has_data_s2_missing <- !is.na(pair_data[[site1_col]]) & is.na(pair_data[[site2_col]])
+  if(any(s1_has_data_s2_missing)) {
+    predictions <- intercept + slope * pair_data[[site1_col]][s1_has_data_s2_missing]
+    
+    # Create a temporary dataframe for the interpolated values
+    temp_df <- data.frame(
+      DATE = pair_data$DATE[s1_has_data_s2_missing],
+      SITECODE = site2,
+      value = predictions
+    )
+    names(temp_df)[3] <- variable
+    
+    # Add interpolated values to original data
+    data <- bind_rows(
+      data,
+      temp_df
+    ) %>% distinct(DATE, SITECODE, .keep_all = TRUE)
+  }
+  
+  # Apply interpolation for site1 where site2 has data but site1 is missing
+  s2_has_data_s1_missing <- is.na(pair_data[[site1_col]]) & !is.na(pair_data[[site2_col]])
+  if(any(s2_has_data_s1_missing)) {
+    # Use inverse relationship
+    inv_intercept <- -intercept/slope
+    inv_slope <- 1/slope
+    predictions <- inv_intercept + inv_slope * pair_data[[site2_col]][s2_has_data_s1_missing]
+    
+    # Create a temporary dataframe for the interpolated values
+    temp_df <- data.frame(
+      DATE = pair_data$DATE[s2_has_data_s1_missing],
+      SITECODE = site1,
+      value = predictions
+    )
+    names(temp_df)[3] <- variable
+    
+    # Add interpolated values to original data
+    data <- bind_rows(
+      data,
+      temp_df
+    ) %>% distinct(DATE, SITECODE, .keep_all = TRUE)
+  }
+  
+  return(data)
+}
+
+# Function to interpolate missing values in a triplet of sites using multiple regression
+interpolate_triplet <- function(data, site1, site2, site3, variable) {
+  # Filter data for the three sites and check for duplicates
+  check_dupes <- data %>% 
+    filter(SITECODE %in% c(site1, site2, site3)) %>%
+    group_by(DATE, SITECODE) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    filter(n > 1)
+  
+  if(nrow(check_dupes) > 0) {
+    print(paste("Warning: Found", nrow(check_dupes), "duplicate date-site combinations"))
+    print(check_dupes)
+    
+    # Summarize duplicates by taking the mean
+    data <- data %>%
+      group_by(DATE, SITECODE) %>%
+      summarise(across(everything(), mean, na.rm = TRUE), .groups = "drop")
+    
+    print("Duplicates have been averaged")
+  }
+  
+  # Now proceed with the filtered data
+  triplet_data <- data %>% 
+    filter(SITECODE %in% c(site1, site2, site3)) %>%
+    select(DATE, SITECODE, !!sym(variable)) %>%
+    pivot_wider(names_from = SITECODE, values_from = !!sym(variable), values_fn = mean)
+  
+  # Create column names
+  site1_col <- paste0(site1)
+  site2_col <- paste0(site2)
+  site3_col <- paste0(site3)
+  
+  # For each site, create a multiple regression model using the other two sites as predictors
+  # 1. Model for site1 using site2 and site3
+  model1_rows <- complete.cases(triplet_data[, c(site1_col, site2_col, site3_col)])
+  model1_count <- sum(model1_rows)
+  
+  if(model1_count < 10) {
+    warning(paste("Not enough complete cases for triplet", site1, site2, site3, "for variable", variable, 
+                  "(only", model1_count, "overlapping records)"))
+    # Return the original data without interpolation
+    return(data)
+  }
+  
+  # Create the three models
+  model1 <- lm(formula = paste0("`", site1_col, "` ~ `", site2_col, "` + `", site3_col, "`"), 
+               data = triplet_data[model1_rows, ])
+  
+  model2 <- lm(formula = paste0("`", site2_col, "` ~ `", site1_col, "` + `", site3_col, "`"), 
+               data = triplet_data[model1_rows, ])
+  
+  model3 <- lm(formula = paste0("`", site3_col, "` ~ `", site1_col, "` + `", site2_col, "`"), 
+               data = triplet_data[model1_rows, ])
+  
+  # Get model summaries
+  model1_summary <- summary(model1)
+  model2_summary <- summary(model2)
+  model3_summary <- summary(model3)
+  
+  # Print model statistics
+  print(paste("Multiple regression model for", variable, "- predicting", site1, "from", site2, "and", site3, ":"))
+  print(paste("  R-squared:", round(model1_summary$r.squared, 4)))
+  print(paste("  Adjusted R-squared:", round(model1_summary$adj.r.squared, 4)))
+  print(paste("  Sample size:", model1_count, "complete records"))
+  
+  print(paste("Multiple regression model for", variable, "- predicting", site2, "from", site1, "and", site3, ":"))
+  print(paste("  R-squared:", round(model2_summary$r.squared, 4)))
+  print(paste("  Adjusted R-squared:", round(model2_summary$adj.r.squared, 4)))
+  
+  print(paste("Multiple regression model for", variable, "- predicting", site3, "from", site1, "and", site2, ":"))
+  print(paste("  R-squared:", round(model3_summary$r.squared, 4)))
+  print(paste("  Adjusted R-squared:", round(model3_summary$adj.r.squared, 4)))
+  
+  # Create and save plots for the models
+  p1 <- create_multiple_regression_plot(site1, c(site2, site3), variable, model1_summary, model1_count)
+  p2 <- create_multiple_regression_plot(site2, c(site1, site3), variable, model2_summary, model1_count)
+  p3 <- create_multiple_regression_plot(site3, c(site1, site2), variable, model3_summary, model1_count)
+  
+  # Save the plots
+  plot_filename1 <- file.path(output_dir, "plots", paste0("multireg_", variable, "_", site1, "_from_", site2, "_", site3, ".png"))
+  plot_filename2 <- file.path(output_dir, "plots", paste0("multireg_", variable, "_", site2, "_from_", site1, "_", site3, ".png"))
+  plot_filename3 <- file.path(output_dir, "plots", paste0("multireg_", variable, "_", site3, "_from_", site1, "_", site2, ".png"))
+  
+  ggsave(plot_filename1, plot = p1, width = 8, height = 6, dpi = 300)
+  ggsave(plot_filename2, plot = p2, width = 8, height = 6, dpi = 300)
+  ggsave(plot_filename3, plot = p3, width = 8, height = 6, dpi = 300)
+  
+  # Now apply the interpolation for missing values
+  
+  # Case 1: Only site1 is missing, use model1 to predict it
+  case1 <- is.na(triplet_data[[site1_col]]) & !is.na(triplet_data[[site2_col]]) & !is.na(triplet_data[[site3_col]])
+  if(any(case1)) {
+    # Create a temp dataframe for prediction
+    temp_df <- triplet_data[case1, c("DATE", site2_col, site3_col)]
+    names(temp_df) <- c("DATE", site2_col, site3_col)
+    
+    # Predict site1 using model1
+    predictions <- predict(model1, newdata = temp_df)
+    
+    # Create dataframe of interpolated values
+    interp_df <- data.frame(
+      DATE = triplet_data$DATE[case1],
+      SITECODE = site1,
+      value = predictions
+    )
+    names(interp_df)[3] <- variable
+    
+    # Add to the data
+    data <- bind_rows(
+      data,
+      interp_df
+    ) %>% distinct(DATE, SITECODE, .keep_all = TRUE)
+  }
+  
+  # Case 2: Only site2 is missing, use model2 to predict it
+  case2 <- !is.na(triplet_data[[site1_col]]) & is.na(triplet_data[[site2_col]]) & !is.na(triplet_data[[site3_col]])
+  if(any(case2)) {
+    # Create a temp dataframe for prediction
+    temp_df <- triplet_data[case2, c("DATE", site1_col, site3_col)]
+    names(temp_df) <- c("DATE", site1_col, site3_col)
+    
+    # Predict site2 using model2
+    predictions <- predict(model2, newdata = temp_df)
+    
+    # Create dataframe of interpolated values
+    interp_df <- data.frame(
+      DATE = triplet_data$DATE[case2],
+      SITECODE = site2,
+      value = predictions
+    )
+    names(interp_df)[3] <- variable
+    
+    # Add to the data
+    data <- bind_rows(
+      data,
+      interp_df
+    ) %>% distinct(DATE, SITECODE, .keep_all = TRUE)
+  }
+  
+  # Case 3: Only site3 is missing, use model3 to predict it
+  case3 <- !is.na(triplet_data[[site1_col]]) & !is.na(triplet_data[[site2_col]]) & is.na(triplet_data[[site3_col]])
+  if(any(case3)) {
+    # Create a temp dataframe for prediction
+    temp_df <- triplet_data[case3, c("DATE", site1_col, site2_col)]
+    names(temp_df) <- c("DATE", site1_col, site2_col)
+    
+    # Predict site3 using model3
+    predictions <- predict(model3, newdata = temp_df)
+    
+    # Create dataframe of interpolated values
+    interp_df <- data.frame(
+      DATE = triplet_data$DATE[case3],
+      SITECODE = site3,
+      value = predictions
+    )
+    names(interp_df)[3] <- variable
+    
+    # Add to the data
+    data <- bind_rows(
+      data,
+      interp_df
+    ) %>% distinct(DATE, SITECODE, .keep_all = TRUE)
+  }
+  
+  # Case 4: site1 and site2 are available, site3 is missing
+  # Already handled by Case 3
+  
+  # Case 5: site1 and site3 are available, site2 is missing
+  # Already handled by Case 2
+  
+  # Case 6: site2 and site3 are available, site1 is missing
+  # Already handled by Case 1
+  
+  # For more complex cases where only one site has data, we'd need to use a different approach
+  # For now, we won't interpolate those cases as they're less reliable
+  
+  return(data)
+}
+
+# Function to process all pairs, triplets and interpolate data
+process_station_groups <- function(data, station_groups, variables) {
+  # First process all the pairs
+  interpolated_data <- data
+  
+  # Keep track of which site pairs were actually interpolated
+  interpolated_pairs <- list()
+  interpolated_triplets <- list()
+  
+  # Process pairs
+  for (pair_name in names(station_groups$pairs)) {
+    pair <- station_groups$pairs[[pair_name]]
+    site1 <- pair$site1
+    site2 <- pair$site2
+    
+    # Check if we can interpolate this pair by looking at data availability
+    pair_can_be_interpolated <- FALSE
+    
+    for (var in variables) {
+      # Extract data for this pair
+      pair_data <- data %>% 
+        filter(SITECODE %in% c(site1, site2)) %>%
+        select(DATE, SITECODE, !!sym(var)) %>%
+        pivot_wider(names_from = SITECODE, values_from = !!sym(var), values_fn = mean)
+      
+      # Count complete cases
+      complete_count <- sum(complete.cases(pair_data[, c(site1, site2)]))
+      
+      if (complete_count >= 5) {
+        pair_can_be_interpolated <- TRUE
+        break
+      }
+    }
+    
+    if (pair_can_be_interpolated) {
+      # Perform interpolation for all variables
+      for (var in variables) {
+        interpolated_data <- interpolate_pair(interpolated_data, site1, site2, var)
+      }
+      # Add to the list of successful interpolations
+      interpolated_pairs[[pair_name]] <- pair
+    } else {
+      message(paste("Warning: Pair", site1, "and", site2, 
+                    "doesn't have enough overlapping data for interpolation."))
+      message("Both sites will be included as standalone without interpolation.")
+    }
+  }
+  
+  # Process triplets
+  for (triplet_name in names(station_groups$triplets)) {
+    triplet <- station_groups$triplets[[triplet_name]]
+    site1 <- triplet$site1
+    site2 <- triplet$site2
+    site3 <- triplet$site3
+    
+    # Check if we can interpolate this triplet by looking at data availability
+    triplet_can_be_interpolated <- FALSE
+    
+    for (var in variables) {
+      # Extract data for this triplet
+      triplet_data <- data %>% 
+        filter(SITECODE %in% c(site1, site2, site3)) %>%
+        select(DATE, SITECODE, !!sym(var)) %>%
+        pivot_wider(names_from = SITECODE, values_from = !!sym(var), values_fn = mean)
+      
+      # Count complete cases where all three sites have data
+      complete_count <- sum(complete.cases(triplet_data[, c(site1, site2, site3)]))
+      
+      if (complete_count >= 10) {  # Need more data for multiple regression
+        triplet_can_be_interpolated <- TRUE
+        break
+      }
+    }
+    
+    if (triplet_can_be_interpolated) {
+      # Perform interpolation for all variables
+      for (var in variables) {
+        interpolated_data <- interpolate_triplet(interpolated_data, site1, site2, site3, var)
+      }
+      # Add to the list of successful interpolations
+      interpolated_triplets[[triplet_name]] <- triplet
+    } else {
+      message(paste("Warning: Triplet", site1, site2, "and", site3, 
+                    "doesn't have enough overlapping data for interpolation."))
+      message("Sites will be interpolated using pairwise relationships instead.")
+      
+      # Fall back to pairwise interpolation for the triplet
+      pair1_name <- paste(site1, site2, sep = "_")
+      pair2_name <- paste(site1, site3, sep = "_")
+      pair3_name <- paste(site2, site3, sep = "_")
+      
+      fallback_pairs <- list(
+        list(site1 = site1, site2 = site2),
+        list(site1 = site1, site2 = site3),
+        list(site1 = site2, site2 = site3)
+      )
+      
+      for (pair in fallback_pairs) {
+        for (var in variables) {
+          interpolated_data <- interpolate_pair(interpolated_data, pair$site1, pair$site2, var)
+        }
+      }
+    }
+  }
+  
+  return(list(
+    data = interpolated_data,
+    interpolated_pairs = interpolated_pairs,
+    interpolated_triplets = interpolated_triplets
+  ))
+}
+
+# Function to create the final site-specific datasets
+create_site_datasets <- function(interpolated_data, site_mapping, variables) {
+  site_datasets <- list()
+  
+  for (site_name in names(site_mapping)) {
+    site_info <- site_mapping[[site_name]]
+    site_data <- data.frame()
+    
+    # Process each variable
+    for (var_idx in seq_along(variables)) {
+      var <- variables[var_idx]
+      var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
+      stations <- site_info[[var_name]]
+      
+      if (length(stations) == 1) {
+        # Single station - just extract the data
+        single_data <- interpolated_data %>%
+          filter(SITECODE == stations[1]) %>%
+          select(DATE, !!sym(var))
+        
+        if (nrow(site_data) == 0) {
+          # First variable, create the dataframe
+          site_data <- single_data %>% mutate(SITECODE = site_name)
+        } else {
+          # Add variable to existing dataframe
+          site_data <- site_data %>% 
+            left_join(single_data, by = "DATE")
+        }
+      } else if (length(stations) >= 2) {
+        # Multiple stations - average the interpolated values
+        multi_data <- interpolated_data %>%
+          filter(SITECODE %in% stations) %>%
+          select(DATE, SITECODE, !!sym(var)) %>%
+          pivot_wider(names_from = SITECODE, values_from = !!sym(var)) %>%
+          mutate(avg_value = rowMeans(select(., stations), na.rm = TRUE)) %>%
+          select(DATE, avg_value)
+        
+        # Rename the averaged column
+        names(multi_data)[2] <- var
+        
+        if (nrow(site_data) == 0) {
+          # First variable, create the dataframe
+          site_data <- multi_data %>% mutate(SITECODE = site_name)
+        } else {
+          # Add variable to existing dataframe
+          site_data <- site_data %>% 
+            left_join(multi_data, by = "DATE")
+        }
+      }
+    }
+    
+    # Store the site dataset
+    site_datasets[[site_name]] <- site_data
+  }
+  
+  return(site_datasets)
+}
+
+# After processing all sites, create a summary plot for each site
+create_site_summary_plots <- function(site_datasets, site_mapping, variables) {
+  for (site_name in names(site_datasets)) {
+    site_data <- site_datasets[[site_name]]
+    site_info <- site_mapping[[site_name]]
+    
+    # Create a time series plot for each variable
+    for (var_idx in seq_along(variables)) {
+      var <- variables[var_idx]
+      var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
+      stations <- site_info[[var_name]]
+      
+      # Get descriptive names for the variables
+      var_labels <- c(
+        "T_C" = "Temperature (°C)",
+        "P_mm_d" = "Precipitation (mm/day)",
+        "RH_d_pct" = "Relative Humidity (%)",
+        "NR_Wm2_d" = "Net Radiation (W/m²)"
+      )
+      
+      # Create a better title with relevant info
+      title <- paste0(site_name, " ", var_labels[var])
+      
+      if (length(stations) == 1) {
+        subtitle <- paste0("Data from ", stations[1])
+      } else if (length(stations) == 2) {
+        subtitle <- paste0("Average of ", stations[1], " and ", stations[2])
+      } else {
+        subtitle <- paste0("Average of ", paste(stations, collapse = ", "))
+      }
+      
+      # Create the time series plot
+      p <- ggplot(site_data, aes(x = DATE, y = !!sym(var))) +
+        geom_line(color = "blue", linewidth = 0.5) +
+        theme_classic(base_size = 12) +
+        theme(
+          plot.title = element_text(face = "bold", hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5),
+          axis.title = element_text(face = "bold"),
+          axis.text = element_text(color = "black")
+        ) +
+        labs(title = title,
+             subtitle = subtitle,
+             x = "Date",
+             y = var_labels[var])
+      
+      # Save the plot
+      plot_filename <- file.path(output_dir, "plots", paste0("timeseries_", site_name, "_", var, ".png"))
+      ggsave(plot_filename, plot = p, width = 10, height = 6, dpi = 300)
+    }
+  }
+}
+
+# Main workflow function
+process_meteorological_data <- function(combined_met, site_mapping, variables) {
+  # Clean any duplicates
+  combined_met_clean <- combined_met %>%
+    group_by(DATE, SITECODE) %>%
+    summarise(across(everything(), mean, na.rm = TRUE), .groups = "drop")
+  
+  # Extract pairs and triplets that need interpolation
+  station_groups <- extract_station_groups(site_mapping)
+  
+  cat("Station pairs that need interpolation:\n")
+  for (pair_name in names(station_groups$pairs)) {
+    pair <- station_groups$pairs[[pair_name]]
+    cat(sprintf("- %s: %s and %s\n", pair_name, pair$site1, pair$site2))
+  }
+  
+  cat("\nStation triplets that need interpolation:\n")
+  for (triplet_name in names(station_groups$triplets)) {
+    triplet <- station_groups$triplets[[triplet_name]]
+    cat(sprintf("- %s: %s, %s, and %s\n", triplet_name, triplet$site1, triplet$site2, triplet$site3))
+  }
+  
+  # Process pairs and triplets and interpolate data
+  results <- process_station_groups(combined_met_clean, station_groups, variables)
+  interpolated_data <- results$data
+  interpolated_pairs <- results$interpolated_pairs
+  interpolated_triplets <- results$interpolated_triplets
+  
+  # Print which pairs were successfully interpolated
+  cat("\nSuccessfully interpolated pairs:\n")
+  for (pair_name in names(interpolated_pairs)) {
+    pair <- interpolated_pairs[[pair_name]]
+    cat(sprintf("- %s and %s\n", pair$site1, pair$site2))
+  }
+  
+  # Print which triplets were successfully interpolated
+  cat("\nSuccessfully interpolated triplets:\n")
+  for (triplet_name in names(interpolated_triplets)) {
+    triplet <- interpolated_triplets[[triplet_name]]
+    cat(sprintf("- %s, %s, and %s\n", triplet$site1, triplet$site2, triplet$site3))
+  }
+  
+  # Create site-specific datasets
+  site_datasets <- create_site_datasets(interpolated_data, site_mapping, variables)
+  
+  # Combine all site datasets into one
+  all_sites_data <- bind_rows(site_datasets)
+  
+  # Return results
+  return(list(
+    interpolated_data = interpolated_data,
+    site_datasets = site_datasets,
+    all_sites_data = all_sites_data,
+    interpolated_pairs = interpolated_pairs,
+    interpolated_triplets = interpolated_triplets
+  ))
+}
+
+###########################
+# PART 3: DATA PROCESSING #
+###########################
+
+# Set the data directory
+met_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/03_Data/all_met"
+
+# Define output directory for results
+output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs/MET"
+
+# Create output directories if they don't exist
+dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path(output_dir, "plots"), showWarnings = FALSE)
+dir.create(file.path(output_dir, "data"), showWarnings = FALSE)
+
+# Load temperature data
+Temp <- make_inter_long("Temperature_original_&_filled_1979_2023_v2.csv", "Temp")
+Temp <- Temp %>%
+  dplyr::select(DATE, SITECODE, Temp) %>%
+  dplyr::rename(T_C = Temp)
+
+# Load precipitation data
+Precip <- make_inter_long("Precipitation_original_&_filled_1979_2023.csv",  "Precip")
+Precip <- Precip %>%
+  dplyr::select(DATE, SITECODE, Precip) %>%
+  dplyr::rename(P_mm_d = Precip)
+
+# Add GSMACK precipitation data
+MACK_Precip <- read_mack_precip("MS00403_v2.csv")
+Precip <- bind_rows(Precip, MACK_Precip)
+
+# Load relative humidity data
+RH <- read_csv(file.path(met_dir, "MS00102_v9.csv"), show_col_types = FALSE) %>%
+  mutate(DATE = parse_my_date(DATE)) %>%
+  dplyr::select(SITECODE, DATE, RELHUM_MEAN_DAY) %>%
+  dplyr::rename(RH_d_pct = RELHUM_MEAN_DAY)
+
+# Load net radiation data
+NetRad <- read_csv(file.path(met_dir, "MS05025_v3.csv"), show_col_types = FALSE) %>%
+  mutate(DATE = parse_my_date(DATE)) %>%
+  select(SITECODE, DATE, NR_TOT_MEAN_DAY) %>%
+  dplyr::rename(NR_Wm2_d = NR_TOT_MEAN_DAY)
+
+# Combine all datasets
+combined_met <- Temp %>%
+  full_join(Precip, by = c("DATE", "SITECODE")) %>%
+  full_join(RH,     by = c("DATE", "SITECODE")) %>%
+  full_join(NetRad, by = c("DATE", "SITECODE")) %>%
+  filter(DATE >= ymd("1997-10-01")) %>%
+  # filter(DATE <= ymd("2018-09-30")) %>%
+  arrange(SITECODE, DATE)
+
+# Define the site mapping based on the complete table
+site_mapping <- list(
+  # Site = list(Temp stations, Precip stations, RH stations, NetRad stations)
+  "GSWS09" = list(temp = c("PRIMET"), 
+                  precip = c("PRIMET"), 
+                  rh = c("PRIMET", "CS2MET"), 
+                  netrad = c("PRIMET")),
+  
+  "GSWS10" = list(temp = c("PRIMET"), 
+                  precip = c("PRIMET"), 
+                  rh = c("PRIMET", "CS2MET"), 
+                  netrad = c("PRIMET")),
+  
+  "GSWS01" = list(temp = c("PRIMET"), 
+                  precip = c("PRIMET"), 
+                  rh = c("PRIMET", "CS2MET"), 
+                  netrad = c("PRIMET")),
+  
+  "GSWS02" = list(temp = c("PRIMET"), 
+                  precip = c("PRIMET"), 
+                  rh = c("PRIMET", "CS2MET"), 
+                  netrad = c("PRIMET")),
+  
+  "GSWS03" = list(temp = c("PRIMET"), 
+                  precip = c("PRIMET"), 
+                  rh = c("PRIMET", "CS2MET"), 
+                  netrad = c("PRIMET")),
+  
+  "GSMACK" = list(temp = c("CENMET", "UPLMET"), 
+                  precip = c("GSMACK", "UPLMET"), 
+                  rh = c("CENMET", "UPLMET"), 
+                  netrad = c("VANMET")),
+  
+  "GSWS06" = list(temp = c("H15MET", "VANMET"), 
+                  precip = c("H15MET"), 
+                  rh = c("H15MET", "VANMET", "WS7MET"), 
+                  netrad = c("VANMET")),
+  
+  "GSWS07" = list(temp = c("H15MET", "VANMET"), 
+                  precip = c("H15MET"), 
+                  rh = c("H15MET", "VANMET", "WS7MET"), 
+                  netrad = c("VANMET")),
+  
+  "GSWS08" = list(temp = c("H15MET", "VANMET"), 
+                  precip = c("H15MET"), 
+                  rh = c("H15MET", "VANMET", "WS7MET"), 
+                  netrad = c("VANMET")),
+  
+  "LONGER" = list(temp = c("CENMET"), 
+                  precip = c("CENMET"), 
+                  rh = c("CENMET"), 
+                  netrad = c("VANMET")),
+  
+  "COLD" = list(temp = c("CENMET", "UPLMET"), 
+                precip = c("CENMET", "UPLMET"), 
+                rh = c("CENMET", "UPLMET"), 
+                netrad = c("VANMET"))
+)
+
+# Variables mapping between the site mapping and the actual data columns
+variable_mapping <- list(
+  temp = "T_C",
+  precip = "P_mm_d",
+  rh = "RH_d_pct",
+  netrad = "NR_Wm2_d"
+)
+
+# Variables to process
+variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d")
+
+# Run the main process
+results <- process_meteorological_data(combined_met, site_mapping, variables)
+
+# Extract the results
+interpolated_data <- results$interpolated_data
+site_datasets <- results$site_datasets
+all_sites_data <- results$all_sites_data
+interpolated_pairs <- results$interpolated_pairs
+interpolated_triplets <- results$interpolated_triplets
+
+# Check for NAs in the all_sites_data
+site_na_counts <- all_sites_data %>%
+  group_by(SITECODE) %>%
+  summarise(across(all_of(variables), ~sum(is.na(.)), .names = "NA_{.col}"))
+
+print("NA counts by site:")
+print(site_na_counts)
+
+# Summary statistics for the all sites dataset
+summary_stats <- all_sites_data %>%
+  group_by(SITECODE) %>%
+  summarise(across(all_of(variables), 
+                   list(
+                     mean = ~mean(., na.rm = TRUE),
+                     min = ~min(., na.rm = TRUE),
+                     max = ~max(., na.rm = TRUE),
+                     n = ~sum(!is.na(.))
+                   )))
+
+print("Summary statistics by site:")
+print(summary_stats)
+
+# Function to plot raw and interpolated data for each site and variable
+# Function to plot raw and interpolated data for each site and variable
+plot_interpolation_comparison <- function(combined_met, interpolated_data, site_mapping, variables) {
+  # Variable labels for nice plot titles
+  var_labels <- c(
+    "T_C" = "Temperature (°C)",
+    "P_mm_d" = "Precipitation (mm/day)",
+    "RH_d_pct" = "Relative Humidity (%)",
+    "NR_Wm2_d" = "Net Radiation (W/m²)"
+  )
+  
+  # Iterate through each site
+  for (site_name in names(site_mapping)) {
+    site_info <- site_mapping[[site_name]]
+    
+    # Iterate through each variable
+    for (var_idx in seq_along(variables)) {
+      var <- variables[var_idx]
+      var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
+      stations <- site_info[[var_name]]
+      
+      # Prepare raw data
+      raw_data <- combined_met %>%
+        filter(SITECODE %in% stations) %>%
+        select(DATE, SITECODE, !!sym(var)) %>%
+        mutate(data_type = "Raw")
+      
+      # Prepare interpolated data
+      interpolated_site_data <- interpolated_data %>%
+        filter(SITECODE %in% c(stations, site_name)) %>%
+        select(DATE, SITECODE, !!sym(var)) %>%
+        mutate(data_type = "Interpolated")
+      
+      # Combine raw and interpolated data
+      plot_data <- bind_rows(raw_data, interpolated_site_data) %>%
+        arrange(DATE)
+      
+      # Create color palette
+      color_values <- c(
+        # Raw stations in blue shades
+        "PRIMET.Raw" = "#4363D8", 
+        "CENMET.Raw" = "#6495ED", 
+        "UPLMET.Raw" = "#87CEFA",
+        "H15MET.Raw" = "#5D8AA8",
+        "VANMET.Raw" = "#6699CC",
+        "WS7MET.Raw" = "#318CE7",
+        "CS2MET.Raw" = "#6AADE4",
+        "GSMACK.Raw" = "#4682B4"
+      )
+      
+      # Add interpolated site in red
+      color_values[paste0(site_name, ".Interpolated")] <- "#FF0000"
+      
+      # Create the plot
+      p <- ggplot(plot_data, aes(x = DATE, y = !!sym(var), 
+                                 color = interaction(SITECODE, data_type), 
+                                 linetype = data_type, 
+                                 shape = data_type)) +
+        geom_point(alpha = 0.6, size = 2) +
+        geom_line(alpha = 0.7, linewidth = 0.5) +
+        scale_color_manual(values = color_values) +
+        scale_linetype_manual(values = c("Raw" = "dashed", "Interpolated" = "solid")) +
+        scale_shape_manual(values = c("Raw" = 1, "Interpolated" = 16)) +
+        theme_classic(base_size = 12) +
+        theme(
+          plot.title = element_text(face = "bold", hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5),
+          axis.title = element_text(face = "bold"),
+          axis.text = element_text(color = "black"),
+          legend.position = "bottom",
+          legend.key.width = unit(1.5, "cm")
+        ) +
+        labs(
+          title = paste("Interpolation Comparison for", site_name, var_labels[var]),
+          subtitle = paste("Raw stations:", paste(stations, collapse = ", ")),
+          x = "Date",
+          y = var_labels[var],
+          color = "Station & Data Type",
+          linetype = "Data Type",
+          shape = "Data Type"
+        )
+      
+      # Save the plot
+      plot_filename <- file.path(output_dir, "plots", 
+                                 paste0("interpolation_comparison_", site_name, "_", var, ".png"))
+      ggsave(plot_filename, plot = p, width = 14, height = 7, dpi = 300)
+    }
+  }
+}
+
+# Create interpolation comparison plots
+plot_interpolation_comparison(combined_met, interpolated_data, site_mapping, variables)
+
+# Create summary time series plots for each site
+create_site_summary_plots(site_datasets, site_mapping, variables)
+
+# Function to add discharge data to the interpolated meteorological dataset
+add_discharge_to_interpolated_data <- function(interpolated_data, discharge, sites_keep = NULL) {
+  # Read drainage area data
+  da_df <- read_csv(file.path(met_dir, "Q", "drainage_area.csv"))
+  
+  # Preprocess discharge data
+  discharge_processed <- discharge %>%
+    left_join(da_df, by = "SITECODE") %>%
+    filter(!is.na(DA_M2)) %>%
+    mutate(
+      Date = as.Date(DATE, "%m/%d/%Y"),
+      Q = MEAN_Q * 0.02831683199881,  # m³/s
+      Q_mm_d = (Q * 86400) / (DA_M2 * 1000000) * 1000  # Convert to mm/day
+    ) %>%
+    select(Date, SITECODE, Q_mm_d) %>%
+    rename(DATE = Date)
+  
+  # Filter sites if specified
+  if (!is.null(sites_keep)) {
+    discharge_processed <- discharge_processed %>%
+      filter(SITECODE %in% sites_keep)
+  }
+  
+  # Add Q_mm_d to the interpolated dataset
+  interpolated_data_with_q <- interpolated_data %>%
+    full_join(discharge_processed, by = c("DATE", "SITECODE"))
+  
+  return(interpolated_data_with_q)
+}
+
+# Add discharge data to interpolated dataset
+discharge <- read_csv(file.path(met_dir, "Q", "HF00402_v14.csv"))
+interpolated_data_with_q <- add_discharge_to_interpolated_data(interpolated_data, discharge)
+
+# Update variables to include discharge
+variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "Q_mm_d")
+
+# Update subsequent processing if needed
+site_datasets <- create_site_datasets(interpolated_data_with_q, site_mapping, variables)
+all_sites_data <- bind_rows(site_datasets)
+
+# Write the results to files
+write_csv(interpolated_data_with_q, file.path(output_dir, "data", "interpolated_met_stations_site_data.csv"))
+write_csv(all_sites_data, file.path(output_dir, "data", "all_sites_met_data_q.csv"))
+
+# Write individual site files
+for (site_name in names(site_datasets)) {
+  write_csv(site_datasets[[site_name]], file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
+}
+
+# Print completion message
+cat("\nProcessing complete! Results saved to:\n")
+cat(paste0("CSV files: ", file.path(output_dir, "data"), "\n"))
+cat(paste0("Plot files: ", file.path(output_dir, "plots"), "\n"))
