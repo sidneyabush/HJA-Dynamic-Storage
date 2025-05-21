@@ -987,13 +987,12 @@ print(summary_stats)
 # Create summary time series plots for each watershed
 create_site_summary_plots(watershed_datasets, site_mapping, variables)
 
+# Ensure columns are in the correct order: DATE, SITECODE, then others
+all_watersheds_data <- all_watersheds_data %>%
+  select(DATE, SITECODE, everything())
+
 # Write the watersheds data to files (NOT the met station data)
 write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_data_q.csv"))
-
-# Write individual watershed files
-for (site_name in names(watershed_datasets)) {
-  write_csv(watershed_datasets[[site_name]], file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
-}
 
 # Print completion message
 cat("\nProcessing complete! Results saved to:\n")
