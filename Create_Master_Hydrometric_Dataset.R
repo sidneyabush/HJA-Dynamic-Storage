@@ -7,7 +7,6 @@ library(ggplot2)
 #############################
 # PART 1: HELPER FUNCTIONS  #
 #############################
-
 # Date parsing function
 parse_my_date <- function(d) {
   parse_date_time(d,
@@ -64,7 +63,6 @@ create_relationship_plot <- function(data, site1, site2, variable, r_squared, co
   return(p)
 }
 
-# Function to create a multiple regression model plot
 # Function to create a multiple regression model plot
 create_multiple_regression_plot <- function(target_site, predictor_sites, variable, model_summary, complete_count) {
   # Create a base plot title and subtitle
@@ -149,7 +147,6 @@ create_multiple_regression_plot <- function(target_site, predictor_sites, variab
 ####################################
 # PART 2: DATA PROCESSING FUNCTIONS #
 ####################################
-
 # Extract all required station pairs and triplets that need interpolation
 extract_station_groups <- function(site_mapping) {
   pairs <- list()
@@ -485,18 +482,6 @@ interpolate_triplet <- function(data, site1, site2, site3, variable) {
     ) %>% distinct(DATE, SITECODE, .keep_all = TRUE)
   }
   
-  # Case 4: site1 and site2 are available, site3 is missing
-  # Already handled by Case 3
-  
-  # Case 5: site1 and site3 are available, site2 is missing
-  # Already handled by Case 2
-  
-  # Case 6: site2 and site3 are available, site1 is missing
-  # Already handled by Case 1
-  
-  # For more complex cases where only one site has data, we'd need to use a different approach
-  # For now, we won't interpolate those cases as they're less reliable
-  
   return(data)
 }
 
@@ -612,8 +597,8 @@ process_station_groups <- function(data, station_groups, variables) {
   ))
 }
 
-# Function to create the final site-specific datasets
-create_site_datasets <- function(interpolated_data, site_mapping, variables) {
+# Modified function to create ONLY the watershed datasets (no met station data)
+create_watershed_datasets <- function(interpolated_data, site_mapping, variables) {
   site_datasets <- list()
   
   for (site_name in names(site_mapping)) {
@@ -623,6 +608,12 @@ create_site_datasets <- function(interpolated_data, site_mapping, variables) {
     # Process each variable
     for (var_idx in seq_along(variables)) {
       var <- variables[var_idx]
+      
+      # Skip if we're beyond the available mappings
+      if (var_idx > length(names(site_info))) {
+        next
+      }
+      
       var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
       stations <- site_info[[var_name]]
       
@@ -663,7 +654,7 @@ create_site_datasets <- function(interpolated_data, site_mapping, variables) {
       }
     }
     
-    # Store the site dataset
+    ## Store the site dataset
     site_datasets[[site_name]] <- site_data
   }
   
@@ -679,21 +670,36 @@ create_site_summary_plots <- function(site_datasets, site_mapping, variables) {
     # Create a time series plot for each variable
     for (var_idx in seq_along(variables)) {
       var <- variables[var_idx]
-      var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
-      stations <- site_info[[var_name]]
+      
+      # Handle the case where var_idx exceeds the number of variable mappings
+      if (var_idx <= length(names(site_info))) {
+        var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
+        stations <- site_info[[var_name]]
+      } else {
+        # For variables like Q_mm_d that don't have a mapping
+        stations <- "N/A"
+      }
       
       # Get descriptive names for the variables
       var_labels <- c(
         "T_C" = "Temperature (°C)",
         "P_mm_d" = "Precipitation (mm/day)",
         "RH_d_pct" = "Relative Humidity (%)",
-        "NR_Wm2_d" = "Net Radiation (W/m²)"
+        "NR_Wm2_d" = "Net Radiation (W/m²)",
+        "Q_mm_d" = "Discharge (mm/day)"
       )
+      
+      # Check if variable exists in the dataset
+      if (!(var %in% names(site_data))) {
+        next  # Skip this variable if it's not in the dataset
+      }
       
       # Create a better title with relevant info
       title <- paste0(site_name, " ", var_labels[var])
       
-      if (length(stations) == 1) {
+      if (var == "Q_mm_d") {
+        subtitle <- "Discharge data from gauging station"
+      } else if (length(stations) == 1) {
         subtitle <- paste0("Data from ", stations[1])
       } else if (length(stations) == 2) {
         subtitle <- paste0("Average of ", stations[1], " and ", stations[2])
@@ -723,7 +729,7 @@ create_site_summary_plots <- function(site_datasets, site_mapping, variables) {
   }
 }
 
-# Main workflow function
+# Modified main workflow function to only generate watershed data
 process_meteorological_data <- function(combined_met, site_mapping, variables) {
   # Clean any duplicates
   combined_met_clean <- combined_met %>%
@@ -765,28 +771,61 @@ process_meteorological_data <- function(combined_met, site_mapping, variables) {
     cat(sprintf("- %s, %s, and %s\n", triplet$site1, triplet$site2, triplet$site3))
   }
   
-  # Create site-specific datasets
-  site_datasets <- create_site_datasets(interpolated_data, site_mapping, variables)
+  # Create site-specific datasets (only watershed data, not met station data)
+  watershed_datasets <- create_watershed_datasets(interpolated_data, site_mapping, variables)
   
-  # Combine all site datasets into one
-  all_sites_data <- bind_rows(site_datasets)
+  # Combine all watershed datasets into one
+  all_watersheds_data <- bind_rows(watershed_datasets)
   
   # Return results
   return(list(
     interpolated_data = interpolated_data,
-    site_datasets = site_datasets,
-    all_sites_data = all_sites_data,
+    watershed_datasets = watershed_datasets,
+    all_watersheds_data = all_watersheds_data,
     interpolated_pairs = interpolated_pairs,
     interpolated_triplets = interpolated_triplets
   ))
 }
 
+# Function to add discharge data to watershed datasets directly
+add_discharge_to_watersheds <- function(watershed_datasets, discharge) {
+  # Read drainage area data
+  da_df <- read_csv(file.path(met_dir, "drainage_area.csv"))
+  
+  # Preprocess discharge data
+  discharge_processed <- discharge %>%
+    left_join(da_df, by = "SITECODE") %>%
+    filter(!is.na(DA_M2)) %>%
+    mutate(
+      Date = as.Date(DATE, "%m/%d/%Y"),
+      Q = MEAN_Q * 0.02831683199881,  # m³/s
+      Q_mm_d = (Q * 86400) / (DA_M2 * 1000000) * 1000  # Convert to mm/day
+    ) %>%
+    select(Date, SITECODE, Q_mm_d) %>%
+    rename(DATE = Date)
+  
+  # Add discharge data to each watershed dataset
+  for (site_name in names(watershed_datasets)) {
+    # Extract discharge data for this site
+    site_discharge <- discharge_processed %>%
+      filter(SITECODE == site_name) %>%
+      select(DATE, Q_mm_d)
+    
+    # Add discharge data to the watershed dataset
+    if (nrow(site_discharge) > 0) {
+      watershed_datasets[[site_name]] <- watershed_datasets[[site_name]] %>%
+        left_join(site_discharge, by = "DATE")
+    }
+  }
+  
+  return(watershed_datasets)
+}
+
 ###########################
 # PART 3: DATA PROCESSING #
 ###########################
-
 # Set the data directory
-met_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/03_Data/all_met"
+met_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/03_Data/all_hydromet"
 
 # Define output directory for results
 output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs/MET"
@@ -900,7 +939,7 @@ variable_mapping <- list(
   netrad = "NR_Wm2_d"
 )
 
-# Variables to process
+# Variables to process (meteorological variables only first)
 variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d")
 
 # Run the main process
@@ -908,21 +947,31 @@ results <- process_meteorological_data(combined_met, site_mapping, variables)
 
 # Extract the results
 interpolated_data <- results$interpolated_data
-site_datasets <- results$site_datasets
-all_sites_data <- results$all_sites_data
+watershed_datasets <- results$watershed_datasets
+all_watersheds_data <- results$all_watersheds_data
 interpolated_pairs <- results$interpolated_pairs
 interpolated_triplets <- results$interpolated_triplets
 
-# Check for NAs in the all_sites_data
-site_na_counts <- all_sites_data %>%
+# Load and add discharge data
+discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv"))
+watershed_datasets <- add_discharge_to_watersheds(watershed_datasets, discharge)
+
+# Update variables to include discharge
+variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "Q_mm_d")
+
+# Combine updated watershed datasets
+all_watersheds_data <- bind_rows(watershed_datasets)
+
+# Check for NAs in the watershed data
+watershed_na_counts <- all_watersheds_data %>%
   group_by(SITECODE) %>%
   summarise(across(all_of(variables), ~sum(is.na(.)), .names = "NA_{.col}"))
 
-print("NA counts by site:")
-print(site_na_counts)
+print("NA counts by watershed:")
+print(watershed_na_counts)
 
-# Summary statistics for the all sites dataset
-summary_stats <- all_sites_data %>%
+# Summary statistics for the watersheds dataset
+summary_stats <- all_watersheds_data %>%
   group_by(SITECODE) %>%
   summarise(across(all_of(variables), 
                    list(
@@ -932,156 +981,21 @@ summary_stats <- all_sites_data %>%
                      n = ~sum(!is.na(.))
                    )))
 
-print("Summary statistics by site:")
+print("Summary statistics by watershed:")
 print(summary_stats)
 
-# Function to plot raw and interpolated data for each site and variable
-# Function to plot raw and interpolated data for each site and variable
-plot_interpolation_comparison <- function(combined_met, interpolated_data, site_mapping, variables) {
-  # Variable labels for nice plot titles
-  var_labels <- c(
-    "T_C" = "Temperature (°C)",
-    "P_mm_d" = "Precipitation (mm/day)",
-    "RH_d_pct" = "Relative Humidity (%)",
-    "NR_Wm2_d" = "Net Radiation (W/m²)"
-  )
-  
-  # Iterate through each site
-  for (site_name in names(site_mapping)) {
-    site_info <- site_mapping[[site_name]]
-    
-    # Iterate through each variable
-    for (var_idx in seq_along(variables)) {
-      var <- variables[var_idx]
-      var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
-      stations <- site_info[[var_name]]
-      
-      # Prepare raw data
-      raw_data <- combined_met %>%
-        filter(SITECODE %in% stations) %>%
-        select(DATE, SITECODE, !!sym(var)) %>%
-        mutate(data_type = "Raw")
-      
-      # Prepare interpolated data
-      interpolated_site_data <- interpolated_data %>%
-        filter(SITECODE %in% c(stations, site_name)) %>%
-        select(DATE, SITECODE, !!sym(var)) %>%
-        mutate(data_type = "Interpolated")
-      
-      # Combine raw and interpolated data
-      plot_data <- bind_rows(raw_data, interpolated_site_data) %>%
-        arrange(DATE)
-      
-      # Create color palette
-      color_values <- c(
-        # Raw stations in blue shades
-        "PRIMET.Raw" = "#4363D8", 
-        "CENMET.Raw" = "#6495ED", 
-        "UPLMET.Raw" = "#87CEFA",
-        "H15MET.Raw" = "#5D8AA8",
-        "VANMET.Raw" = "#6699CC",
-        "WS7MET.Raw" = "#318CE7",
-        "CS2MET.Raw" = "#6AADE4",
-        "GSMACK.Raw" = "#4682B4"
-      )
-      
-      # Add interpolated site in red
-      color_values[paste0(site_name, ".Interpolated")] <- "#FF0000"
-      
-      # Create the plot
-      p <- ggplot(plot_data, aes(x = DATE, y = !!sym(var), 
-                                 color = interaction(SITECODE, data_type), 
-                                 linetype = data_type, 
-                                 shape = data_type)) +
-        geom_point(alpha = 0.6, size = 2) +
-        geom_line(alpha = 0.7, linewidth = 0.5) +
-        scale_color_manual(values = color_values) +
-        scale_linetype_manual(values = c("Raw" = "dashed", "Interpolated" = "solid")) +
-        scale_shape_manual(values = c("Raw" = 1, "Interpolated" = 16)) +
-        theme_classic(base_size = 12) +
-        theme(
-          plot.title = element_text(face = "bold", hjust = 0.5),
-          plot.subtitle = element_text(hjust = 0.5),
-          axis.title = element_text(face = "bold"),
-          axis.text = element_text(color = "black"),
-          legend.position = "bottom",
-          legend.key.width = unit(1.5, "cm")
-        ) +
-        labs(
-          title = paste("Interpolation Comparison for", site_name, var_labels[var]),
-          subtitle = paste("Raw stations:", paste(stations, collapse = ", ")),
-          x = "Date",
-          y = var_labels[var],
-          color = "Station & Data Type",
-          linetype = "Data Type",
-          shape = "Data Type"
-        )
-      
-      # Save the plot
-      plot_filename <- file.path(output_dir, "plots", 
-                                 paste0("interpolation_comparison_", site_name, "_", var, ".png"))
-      ggsave(plot_filename, plot = p, width = 14, height = 7, dpi = 300)
-    }
-  }
-}
+# Create summary time series plots for each watershed
+create_site_summary_plots(watershed_datasets, site_mapping, variables)
 
-# Create interpolation comparison plots
-plot_interpolation_comparison(combined_met, interpolated_data, site_mapping, variables)
+# Write the watersheds data to files (NOT the met station data)
+write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_data_q.csv"))
 
-# Create summary time series plots for each site
-create_site_summary_plots(site_datasets, site_mapping, variables)
-
-# Function to add discharge data to the interpolated meteorological dataset
-add_discharge_to_interpolated_data <- function(interpolated_data, discharge, sites_keep = NULL) {
-  # Read drainage area data
-  da_df <- read_csv(file.path(met_dir, "Q", "drainage_area.csv"))
-  
-  # Preprocess discharge data
-  discharge_processed <- discharge %>%
-    left_join(da_df, by = "SITECODE") %>%
-    filter(!is.na(DA_M2)) %>%
-    mutate(
-      Date = as.Date(DATE, "%m/%d/%Y"),
-      Q = MEAN_Q * 0.02831683199881,  # m³/s
-      Q_mm_d = (Q * 86400) / (DA_M2 * 1000000) * 1000  # Convert to mm/day
-    ) %>%
-    select(Date, SITECODE, Q_mm_d) %>%
-    rename(DATE = Date)
-  
-  # Filter sites if specified
-  if (!is.null(sites_keep)) {
-    discharge_processed <- discharge_processed %>%
-      filter(SITECODE %in% sites_keep)
-  }
-  
-  # Add Q_mm_d to the interpolated dataset
-  interpolated_data_with_q <- interpolated_data %>%
-    full_join(discharge_processed, by = c("DATE", "SITECODE"))
-  
-  return(interpolated_data_with_q)
-}
-
-# Add discharge data to interpolated dataset
-discharge <- read_csv(file.path(met_dir, "Q", "HF00402_v14.csv"))
-interpolated_data_with_q <- add_discharge_to_interpolated_data(interpolated_data, discharge)
-
-# Update variables to include discharge
-variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "Q_mm_d")
-
-# Update subsequent processing if needed
-site_datasets <- create_site_datasets(interpolated_data_with_q, site_mapping, variables)
-all_sites_data <- bind_rows(site_datasets)
-
-# Write the results to files
-write_csv(interpolated_data_with_q, file.path(output_dir, "data", "interpolated_met_stations_site_data.csv"))
-write_csv(all_sites_data, file.path(output_dir, "data", "all_sites_met_data_q.csv"))
-
-# Write individual site files
-for (site_name in names(site_datasets)) {
-  write_csv(site_datasets[[site_name]], file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
+# Write individual watershed files
+for (site_name in names(watershed_datasets)) {
+  write_csv(watershed_datasets[[site_name]], file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
 }
 
 # Print completion message
 cat("\nProcessing complete! Results saved to:\n")
-cat(paste0("CSV files: ", file.path(output_dir, "data"), "\n"))
+cat(paste0("Watershed CSV files: ", file.path(output_dir, "data"), "\n"))
 cat(paste0("Plot files: ", file.path(output_dir, "plots"), "\n"))
