@@ -1396,13 +1396,22 @@ gslook_full_df <- all_watersheds_data %>%
   select(DATE, SITECODE, everything())
 
 # ---- 3. Add discharge from GSLOOK site only (Q_mm_d) ----
-gslook_q <- all_watersheds_data %>%
+# Instead of all_watersheds_data, compute from raw discharge data
+da_df <- read_csv(file.path(met_dir, "drainage_area.csv"))
+gslook_q <- discharge %>%
   filter(SITECODE == "GSLOOK") %>%
+  left_join(da_df, by = "SITECODE") %>%
+  mutate(
+    DATE = as.Date(DATE, "%m/%d/%Y"),
+    Q = MEAN_Q * 0.02831683199881,  # cfs to m³/s
+    Q_mm_d = (Q * 86400) / (DA_M2 * 1000000) * 1000
+  ) %>%
   select(DATE, Q_mm_d)
+
 
 # Add Q_mm_d to GSLOOK_FULL
 gslook_full_df <- gslook_full_df %>%
-  select(-Q_mm_d, everything()) %>%  # in case the averaging created a (mostly NA) Q_mm_d
+  #dplyr::select(-Q_mm_d, everything()) %>%  # in case the averaging created a (mostly NA) Q_mm_d
   left_join(gslook_q, by = "DATE")
 
 # ---- 4. Combine with all other watersheds ----
