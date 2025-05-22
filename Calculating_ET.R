@@ -3,20 +3,20 @@ library(dplyr)
 library(lubridate)
 library(tidyr)
 library(ggplot2)
-library(viridis)
 
 rm(list = ls())
 
 # Set data directories
 input_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs/MET/data"
 output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs/ET"
+plot_dir <- file.path(output_dir, "plots")
 
-dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(plot_dir, showWarnings = FALSE, recursive = TRUE)
 
 # Import all_watersheds_data
 all_watersheds_data <- read_csv(file.path(input_dir, "watersheds_met_data_q.csv"))
 
-# =============== THEORETICAL ALPHA FUNCTIONS (Zhang et al. 2016) ===============
+# THEORETICAL ALPHA FUNCTIONS (Zhang et al. 2016)
 calculate_specific_humidity <- function(temp_celsius, rh_percent, pressure_kpa = 101.325) {
   es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
   e <- es * (rh_percent / 100)
@@ -44,10 +44,11 @@ calculate_alpha_theoretical <- function(temp_celsius, rh_percent, pressure_kpa =
   gamma <- 0.067  # kPa/°C at sea level
   Bo <- calculate_bowen_ratio_simplified(temp_celsius, q_specific)
   alpha <- (1 + Bo) * (delta / (delta + gamma))
-  alpha <- pmax(0.9, pmin(1.4, alpha))
+  # alpha <- pmax(0.9, pmin(1.4, alpha))
   return(alpha)
 }
-# =========== SZILAGYI et al. (2014) α(T) FUNCTION ===========
+
+# SZILAGYI et al. (2014) α(T) FUNCTION
 calculate_alpha_szilagyi <- function(temp_celsius) {
   alpha <- -3.89e-6 * temp_celsius^3 +
     4.78e-4 * temp_celsius^2 -
@@ -55,7 +56,8 @@ calculate_alpha_szilagyi <- function(temp_celsius) {
   alpha <- pmax(0.8, pmin(1.4, alpha))
   return(alpha)
 }
-# ==================== PRIESTLEY-TAYLOR ET ====================
+
+# PRIESTLEY-TAYLOR ET
 calculate_et_pt <- function(alpha, net_radiation_wm2, temp_celsius, rh_percent) {
   G <- 0
   net_radiation_mjm2d <- net_radiation_wm2 * 0.0864
@@ -68,7 +70,8 @@ calculate_et_pt <- function(alpha, net_radiation_wm2, temp_celsius, rh_percent) 
   et_pt <- alpha * (delta / (delta + gamma)) * (available_energy / lambda_v)
   return(pmax(0, et_pt))
 }
-# ========== WEEKLY AVERAGING FOR THEORETICAL ALPHA ==========
+
+# WEEKLY AVERAGING FOR THEORETICAL ALPHA (ZHANG)
 calculate_weekly_theoretical_alpha <- function(data) {
   data$DATE <- as.Date(data$DATE)
   data$week_start <- floor_date(data$DATE, "week")
@@ -95,10 +98,11 @@ calculate_weekly_theoretical_alpha <- function(data) {
   return(data)
 }
 
-# ==================== MAIN WORKFLOW ====================
+# MAIN WORKFLOW
 results <- all_watersheds_data
 results <- calculate_weekly_theoretical_alpha(results)
 results$alpha_szilagyi <- sapply(results$T_C, calculate_alpha_szilagyi)
+
 results$ET_PT_fixed_1.26 <- calculate_et_pt(
   alpha = 1.26,
   net_radiation_wm2 = results$NR_Wm2_d,
@@ -111,65 +115,121 @@ results$ET_PT_fixed_0.9 <- calculate_et_pt(
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
-results$ET_PT_TRH <- calculate_et_pt(
+results$ET_PT_zhang <- calculate_et_pt(
   alpha = results$alpha_theoretical_weekly,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
-results$ET_PT_T <- calculate_et_pt(
+results$ET_PT_szilagyi <- calculate_et_pt(
   alpha = results$alpha_szilagyi,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
 
-# Filter for complete cases across all four ET estimates
 results_complete <- results %>%
-  filter(complete.cases(select(., ET_PT_fixed_1.26, ET_PT_fixed_0.9, ET_PT_TRH, ET_PT_T)))
+  filter(complete.cases(select(., ET_PT_fixed_1.26, ET_PT_fixed_0.9, ET_PT_zhang, ET_PT_szilagyi)))
 
-# Pivot to long format for plotting
 et_long <- results_complete %>%
-  select(DATE, SITECODE, ET_PT_fixed_1.26, ET_PT_fixed_0.9, ET_PT_TRH, ET_PT_T) %>%
+  select(DATE, SITECODE, ET_PT_fixed_1.26, ET_PT_fixed_0.9, ET_PT_zhang, ET_PT_szilagyi) %>%
   pivot_longer(
     cols = starts_with("ET_PT_"),
     names_to = "Method",
     values_to = "ET_mm_day"
   ) %>%
   mutate(Method = factor(Method, 
-                         levels = c("ET_PT_fixed_1.26", "ET_PT_fixed_0.9", "ET_PT_TRH", "ET_PT_T"),
-                         labels = c("Fixed 1.26", "Fixed 0.9", "T_RH", "T")
+                         levels = c("ET_PT_fixed_1.26", "ET_PT_fixed_0.9", "ET_PT_zhang", "ET_PT_szilagyi"),
+                         labels = c("Fixed 1.26", "Fixed 0.9", "Zhang et al. (2016) α(T_RH)", "Szilagyi et al. (2014) α(T)")
   ))
 
-# Define colorblind-friendly palette and linetypes
-method_colors <- viridis::viridis(4, option = "D")
-method_types <- c("solid", "dashed", "dotdash", "twodash")
-names(method_colors) <- levels(et_long$Method)
-names(method_types) <- levels(et_long$Method)
+# Add the alpha values (for plotting)
+results_complete <- results_complete %>%
+  mutate(
+    alpha_fixed_1.26 = 1.26,
+    alpha_fixed_0.9 = 0.9,
+    alpha_zhang = alpha_theoretical_weekly,
+    alpha_szilagyi = alpha_szilagyi
+  )
 
-# Export one plot per SITECODE
+# Pivot to long format for alpha
+alpha_long <- results_complete %>%
+  select(DATE, SITECODE, alpha_fixed_1.26, alpha_fixed_0.9, alpha_zhang, alpha_szilagyi) %>%
+  pivot_longer(
+    cols = starts_with("alpha_"),
+    names_to = "Method",
+    values_to = "Alpha"
+  ) %>%
+  mutate(Method = factor(Method,
+                         levels = c("alpha_fixed_1.26", "alpha_fixed_0.9", "alpha_zhang", "alpha_szilagyi"),
+                         labels = c("Fixed 1.26", "Fixed 0.9", "Zhang et al. (2016) α(T_RH)", "Szilagyi et al. (2014) α(T)")
+  ))
+
+
+# Export one plot per SITECODE (only color, no linetype)
 site_list <- unique(et_long$SITECODE)
 for (site in site_list) {
   p <- ggplot(filter(et_long, SITECODE == site),
-              aes(x = DATE, y = ET_mm_day, color = Method, linetype = Method)) +
-    geom_line(size = 1.1, alpha = 0.93) +
+              aes(x = DATE, y = ET_mm_day, color = Method)) +
+    geom_line(size = 0.7, alpha = 0.93) +  # thinner lines
     labs(
       title = paste0("Daily ET Comparison at ", site),
       x = "Date",
       y = "ET (mm/day)",
-      color = "Method",
-      linetype = "Method"
+      color = "Method"
     ) +
-    scale_color_manual(values = method_colors) +
-    scale_linetype_manual(values = method_types) +
-    theme_minimal(base_size = 15) +
+    theme_bw(base_size = 15) +  # white background
     theme(
       legend.position = "bottom",
       strip.text = element_text(face = "bold"),
       axis.text.x = element_text(angle = 45, hjust = 1),
       panel.grid.minor = element_blank()
     )
-  ggsave(file.path(output_dir, paste0("ET_methods_comparison_", site, ".png")), p, width = 10, height = 6)
+  ggsave(file.path(plot_dir, paste0("ET_methods_comparison_", site, ".png")), p, width = 10, height = 6)
 }
 
-cat("\nExported daily ET comparison plots for each SITECODE to:\n", output_dir, "\n")
+cat("\nExported daily ET comparison plots for each SITECODE to:\n", plot_dir, "\n")
+
+
+# Export one alpha plot per SITECODE
+for (site in unique(alpha_long$SITECODE)) {
+  p <- ggplot(filter(alpha_long, SITECODE == site),
+              aes(x = DATE, y = Alpha, color = Method)) +
+    geom_line(size = 0.8, alpha = 0.98) +
+    labs(
+      title = paste0("Alpha (α) Through Time: ", site),
+      x = "Date",
+      y = "Alpha (α)",
+      color = "Method"
+    ) +
+    theme_bw(base_size = 15) +
+    theme(
+      legend.position = "bottom",
+      strip.text = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.minor = element_blank()
+    )
+  ggsave(file.path(plot_dir, paste0("Alpha_time_series_", site, ".png")), p, width = 10, height = 5)
+}
+
+
+# Add year and month columns for grouping
+et_long <- et_long %>%
+  mutate(
+    year = year(DATE),
+    month = month(DATE, label = TRUE, abbr = TRUE)
+  )
+
+# Summarize mean daily ET by month, method, and site
+et_monthly_summary <- et_long %>%
+  group_by(SITECODE, Method, month) %>%
+  summarise(
+    mean_ET_mm_day = mean(ET_mm_day, na.rm = TRUE),
+    sd_ET_mm_day = sd(ET_mm_day, na.rm = TRUE),
+    n_days = n(),
+    .groups = "drop"
+  )
+
+# Preview result
+print(head(et_monthly_summary, 15))
+
