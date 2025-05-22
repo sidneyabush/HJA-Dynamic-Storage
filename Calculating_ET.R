@@ -3,6 +3,7 @@ library(dplyr)
 library(lubridate)
 library(tidyr)
 library(ggplot2)
+library(viridis)
 
 rm(list = ls())
 
@@ -16,20 +17,17 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 all_watersheds_data <- read_csv(file.path(input_dir, "watersheds_met_data_q.csv"))
 
 # =============== THEORETICAL ALPHA FUNCTIONS (Zhang et al. 2016) ===============
-
 calculate_specific_humidity <- function(temp_celsius, rh_percent, pressure_kpa = 101.325) {
   es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
   e <- es * (rh_percent / 100)
   q <- 0.622 * e / (pressure_kpa - 0.378 * e)
   return(q)
 }
-
 calculate_delta <- function(temp_celsius) {
   es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
   delta <- 4098 * es / ((temp_celsius + 237.3)^2)
   return(delta)
 }
-
 calculate_bowen_ratio_simplified <- function(temp_celsius, q_specific) {
   cp <- 1005  # J/kg/K
   lambda_v <- (2.501 - 0.002361 * temp_celsius) * 1e6  # J/kg
@@ -40,7 +38,6 @@ calculate_bowen_ratio_simplified <- function(temp_celsius, q_specific) {
   Bo <- pmax(0.1, pmin(2.0, Bo))
   return(Bo)
 }
-
 calculate_alpha_theoretical <- function(temp_celsius, rh_percent, pressure_kpa = 101.325) {
   q_specific <- calculate_specific_humidity(temp_celsius, rh_percent, pressure_kpa)
   delta <- calculate_delta(temp_celsius)
@@ -50,16 +47,14 @@ calculate_alpha_theoretical <- function(temp_celsius, rh_percent, pressure_kpa =
   alpha <- pmax(0.9, pmin(1.4, alpha))
   return(alpha)
 }
-
 # =========== SZILAGYI et al. (2014) α(T) FUNCTION ===========
 calculate_alpha_szilagyi <- function(temp_celsius) {
   alpha <- -3.89e-6 * temp_celsius^3 +
     4.78e-4 * temp_celsius^2 -
     2.54e-2 * temp_celsius + 1.64
-  alpha <- pmax(0.8, pmin(1.4, alpha))  # enforce reasonable bounds
+  alpha <- pmax(0.8, pmin(1.4, alpha))
   return(alpha)
 }
-
 # ==================== PRIESTLEY-TAYLOR ET ====================
 calculate_et_pt <- function(alpha, net_radiation_wm2, temp_celsius, rh_percent) {
   G <- 0
@@ -73,7 +68,6 @@ calculate_et_pt <- function(alpha, net_radiation_wm2, temp_celsius, rh_percent) 
   et_pt <- alpha * (delta / (delta + gamma)) * (available_energy / lambda_v)
   return(pmax(0, et_pt))
 }
-
 # ========== WEEKLY AVERAGING FOR THEORETICAL ALPHA ==========
 calculate_weekly_theoretical_alpha <- function(data) {
   data$DATE <- as.Date(data$DATE)
@@ -94,7 +88,7 @@ calculate_weekly_theoretical_alpha <- function(data) {
   )
   data <- data %>%
     left_join(
-      weekly_stats %>% 
+      weekly_stats %>%
         select(SITECODE, week_start, alpha_theoretical_weekly),
       by = c("SITECODE", "week_start")
     )
@@ -103,36 +97,27 @@ calculate_weekly_theoretical_alpha <- function(data) {
 
 # ==================== MAIN WORKFLOW ====================
 results <- all_watersheds_data
-
-# Calculate weekly theoretical alpha
 results <- calculate_weekly_theoretical_alpha(results)
-
-# Calculate alpha_szilagyi
 results$alpha_szilagyi <- sapply(results$T_C, calculate_alpha_szilagyi)
-
-# Calculate ET for all methods
-results$ET_PT_alpha_1.26 <- calculate_et_pt(
+results$ET_PT_fixed_1.26 <- calculate_et_pt(
   alpha = 1.26,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
-
-results$ET_PT_alpha_0.9 <- calculate_et_pt(
+results$ET_PT_fixed_0.9 <- calculate_et_pt(
   alpha = 0.9,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
-
-results$ET_PT_theoretical <- calculate_et_pt(
+results$ET_PT_TRH <- calculate_et_pt(
   alpha = results$alpha_theoretical_weekly,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
-
-results$ET_PT_szilagyi <- calculate_et_pt(
+results$ET_PT_T <- calculate_et_pt(
   alpha = results$alpha_szilagyi,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
@@ -141,42 +126,50 @@ results$ET_PT_szilagyi <- calculate_et_pt(
 
 # Filter for complete cases across all four ET estimates
 results_complete <- results %>%
-  filter(complete.cases(select(., ET_PT_alpha_1.26, ET_PT_alpha_0.9, ET_PT_theoretical, ET_PT_szilagyi)))
+  filter(complete.cases(select(., ET_PT_fixed_1.26, ET_PT_fixed_0.9, ET_PT_TRH, ET_PT_T)))
 
 # Pivot to long format for plotting
 et_long <- results_complete %>%
-  select(DATE, SITECODE, ET_PT_alpha_1.26, ET_PT_alpha_0.9, ET_PT_theoretical, ET_PT_szilagyi) %>%
+  select(DATE, SITECODE, ET_PT_fixed_1.26, ET_PT_fixed_0.9, ET_PT_TRH, ET_PT_T) %>%
   pivot_longer(
     cols = starts_with("ET_PT_"),
     names_to = "Method",
     values_to = "ET_mm_day"
   ) %>%
-  mutate(Method = case_when(
-    Method == "ET_PT_alpha_1.26" ~ "Fixed α = 1.26",
-    Method == "ET_PT_alpha_0.9" ~ "Fixed α = 0.9",
-    Method == "ET_PT_theoretical" ~ "Theoretical α (weekly)",
-    Method == "ET_PT_szilagyi" ~ "Szilagyi et al. (2014) α(T)"
+  mutate(Method = factor(Method, 
+                         levels = c("ET_PT_fixed_1.26", "ET_PT_fixed_0.9", "ET_PT_TRH", "ET_PT_T"),
+                         labels = c("Fixed 1.26", "Fixed 0.9", "T_RH", "T")
   ))
 
-# ==================== PLOTTING ====================
-p_et_facet <- ggplot(et_long, aes(x = DATE, y = ET_mm_day, color = Method)) +
-  geom_line(alpha = 0.9, size = 0.6) +
-  labs(
-    title = "Daily ET Estimates by Method for Each Site",
-    x = "Date",
-    y = "ET (mm/day)",
-    color = "Method"
-  ) +
-  facet_wrap(~ SITECODE, scales = "free_y") +
-  theme_minimal(base_size = 13) +
-  theme(
-    legend.position = "bottom",
-    strip.text = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
+# Define colorblind-friendly palette and linetypes
+method_colors <- viridis::viridis(4, option = "D")
+method_types <- c("solid", "dashed", "dotdash", "twodash")
+names(method_colors) <- levels(et_long$Method)
+names(method_types) <- levels(et_long$Method)
 
-ggsave(file.path(output_dir, "ET_facetgrid_all_methods_szilagyi.png"), p_et_facet, width = 14, height = 9)
+# Export one plot per SITECODE
+site_list <- unique(et_long$SITECODE)
+for (site in site_list) {
+  p <- ggplot(filter(et_long, SITECODE == site),
+              aes(x = DATE, y = ET_mm_day, color = Method, linetype = Method)) +
+    geom_line(size = 1.1, alpha = 0.93) +
+    labs(
+      title = paste0("Daily ET Comparison at ", site),
+      x = "Date",
+      y = "ET (mm/day)",
+      color = "Method",
+      linetype = "Method"
+    ) +
+    scale_color_manual(values = method_colors) +
+    scale_linetype_manual(values = method_types) +
+    theme_minimal(base_size = 15) +
+    theme(
+      legend.position = "bottom",
+      strip.text = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.minor = element_blank()
+    )
+  ggsave(file.path(output_dir, paste0("ET_methods_comparison_", site, ".png")), p, width = 10, height = 6)
+}
 
-cat("\n========== DAILY ET FACET GRID PLOT SAVED ==========\n")
-cat("\nFigure saved to:", file.path(output_dir, "ET_facetgrid_all_methods_szilagyi.png"), "\n")
-cat("\n====================================================\n")
+cat("\nExported daily ET comparison plots for each SITECODE to:\n", output_dir, "\n")
