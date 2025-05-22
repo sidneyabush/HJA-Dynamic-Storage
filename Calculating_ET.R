@@ -233,3 +233,41 @@ et_monthly_summary <- et_long %>%
 # Preview result
 print(head(et_monthly_summary, 15))
 
+
+# Final dataset: Only Zhang method, all variables retained
+zhang_export <- results_complete %>%
+  # Keep all columns, but add clear column names for Zhang alpha and ET
+  mutate(
+    zhang_alpha = alpha_theoretical_weekly,       # explicitly name the Zhang weekly alpha
+    ET_PT_zhang = ET_PT_zhang                    # daily PT-ET using Zhang alpha (already present, for clarity)
+  ) %>%
+  # Optionally, select or arrange columns as you prefer, or keep all
+  select(DATE, SITECODE, everything())
+
+# Export to CSV
+write_csv(zhang_export, file.path(output_dir, "daily_ET_watersheds_zhang_alpha.csv"))
+
+cat("\nExported final daily Zhang dataset to:\n",
+    file.path(output_dir, "daily_ET_watersheds_zhang_alpha.csv"), "\n")
+
+
+# ---- Export daily water balance file: Date, SITECODE, P, Q, ET ----
+
+# Confirm your variable names for P and Q (adjust if needed)
+# Here assuming columns are named: P_mm_d, Q_mm_day, ET_PT_zhang
+
+water_balance_export <- results_complete %>%
+  transmute(
+    DATE,
+    SITECODE,
+    T_C = T_C,
+    P_mm_day = P_mm_d,
+    Q_mm_day = Q_mm_d,
+    ET_mm_day = ET_PT_zhang
+  )
+
+write_csv(water_balance_export, file.path(output_dir, "daily_water_balance_zhang.csv"))
+
+cat("\nExported daily water balance dataset to:\n",
+    file.path(output_dir, "daily_water_balance_zhang.csv"), "\n")
+
