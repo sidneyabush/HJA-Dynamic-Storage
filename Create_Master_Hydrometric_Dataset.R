@@ -4,6 +4,9 @@ library(lubridate)
 library(tidyr)
 library(ggplot2)
 
+rm(list = ls())
+
+
 #############################
 # PART 1: HELPER FUNCTIONS  #
 #############################
@@ -33,6 +36,20 @@ read_mack_precip <- function(fname) {
     filter(SITECODE == "GSMACK") %>%  # Only keep GSMACK site data
     select(DATE, SITECODE, PRECIP_TOT_DAY) %>%
     rename(P_mm_d = PRECIP_TOT_DAY)  # Rename to match your naming convention
+}
+
+# Function to calculate VPD from temperature and relative humidity
+calculate_vpd <- function(temp_celsius, rh_percent) {
+  # Calculate saturation vapor pressure (kPa) using temperature
+  es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
+  
+  # Calculate actual vapor pressure (kPa)
+  ea <- es * (rh_percent / 100)
+  
+  # Calculate vapor pressure deficit (kPa)
+  vpd <- es - ea
+  
+  return(vpd)
 }
 
 # Function for better formatted plots
@@ -142,6 +159,175 @@ create_multiple_regression_plot <- function(target_site, predictor_sites, variab
     labs(title = title, subtitle = subtitle)
   
   return(p)
+}
+
+# Add this function to create comparison plots for specific triplet stations
+plot_triplet_station_comparisons <- function(interpolated_data) {
+  # Extract RH data for the specific stations
+  triplet_stations <- c("WS7MET", "VANMET", "H15MET")
+  
+  triplet_rh_data <- interpolated_data %>%
+    filter(SITECODE %in% triplet_stations) %>%
+    select(DATE, SITECODE, RH_d_pct) %>%
+    pivot_wider(names_from = SITECODE, values_from = RH_d_pct)
+  
+  # Remove rows where we don't have all stations data
+  complete_triplet_data <- triplet_rh_data %>%
+    filter(!is.na(WS7MET) & !is.na(VANMET) & !is.na(H15MET))
+  
+  # Create WS7MET vs VANMET plot
+  p1 <- ggplot(complete_triplet_data, aes(x = WS7MET, y = VANMET)) +
+    geom_point(alpha = 0.6, color = "blue") +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    ) +
+    labs(title = "Comparison of Relative Humidity",
+         subtitle = "WS7MET vs VANMET",
+         x = "WS7MET Relative Humidity (%)",
+         y = "VANMET Relative Humidity (%)")
+  
+  # Calculate R-squared for WS7MET vs VANMET
+  model_ws7_van <- lm(VANMET ~ WS7MET, data = complete_triplet_data)
+  r_squared_ws7_van <- summary(model_ws7_van)$r.squared
+  
+  # Add R-squared annotation to plot
+  p1 <- p1 + 
+    annotate("text", 
+             x = min(complete_triplet_data$WS7MET, na.rm = TRUE) + 
+               0.8 * (max(complete_triplet_data$WS7MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$WS7MET, na.rm = TRUE)),
+             y = min(complete_triplet_data$VANMET, na.rm = TRUE) + 
+               0.1 * (max(complete_triplet_data$VANMET, na.rm = TRUE) - 
+                        min(complete_triplet_data$VANMET, na.rm = TRUE)),
+             label = sprintf("R² = %.3f", r_squared_ws7_van),
+             hjust = 1, 
+             fontface = "bold")
+  
+  # Create WS7MET vs H15MET plot
+  p2 <- ggplot(complete_triplet_data, aes(x = WS7MET, y = H15MET)) +
+    geom_point(alpha = 0.6, color = "blue") +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    ) +
+    labs(title = "Comparison of Relative Humidity",
+         subtitle = "WS7MET vs H15MET",
+         x = "WS7MET Relative Humidity (%)",
+         y = "H15MET Relative Humidity (%)")
+  
+  # Calculate R-squared for WS7MET vs H15MET
+  model_ws7_h15 <- lm(H15MET ~ WS7MET, data = complete_triplet_data)
+  r_squared_ws7_h15 <- summary(model_ws7_h15)$r.squared
+  
+  # Add R-squared annotation to plot
+  p2 <- p2 + 
+    annotate("text", 
+             x = min(complete_triplet_data$WS7MET, na.rm = TRUE) + 
+               0.8 * (max(complete_triplet_data$WS7MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$WS7MET, na.rm = TRUE)),
+             y = min(complete_triplet_data$H15MET, na.rm = TRUE) + 
+               0.1 * (max(complete_triplet_data$H15MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$H15MET, na.rm = TRUE)),
+             label = sprintf("R² = %.3f", r_squared_ws7_h15),
+             hjust = 1, 
+             fontface = "bold")
+  
+  # Also create VANMET vs H15MET plot for completeness
+  p3 <- ggplot(complete_triplet_data, aes(x = VANMET, y = H15MET)) +
+    geom_point(alpha = 0.6, color = "blue") +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    ) +
+    labs(title = "Comparison of Relative Humidity",
+         subtitle = "VANMET vs H15MET",
+         x = "VANMET Relative Humidity (%)",
+         y = "H15MET Relative Humidity (%)")
+  
+  # Calculate R-squared for VANMET vs H15MET
+  model_van_h15 <- lm(H15MET ~ VANMET, data = complete_triplet_data)
+  r_squared_van_h15 <- summary(model_van_h15)$r.squared
+  
+  # Add R-squared annotation to plot
+  p3 <- p3 + 
+    annotate("text", 
+             x = min(complete_triplet_data$VANMET, na.rm = TRUE) + 
+               0.8 * (max(complete_triplet_data$VANMET, na.rm = TRUE) - 
+                        min(complete_triplet_data$VANMET, na.rm = TRUE)),
+             y = min(complete_triplet_data$H15MET, na.rm = TRUE) + 
+               0.1 * (max(complete_triplet_data$H15MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$H15MET, na.rm = TRUE)),
+             label = sprintf("R² = %.3f", r_squared_van_h15),
+             hjust = 1, 
+             fontface = "bold")
+  
+  # Create time series comparison of all three stations
+  triplet_long <- triplet_rh_data %>%
+    pivot_longer(cols = c("WS7MET", "VANMET", "H15MET"), 
+                 names_to = "Station", 
+                 values_to = "RH_pct")
+  
+  p4 <- ggplot(triplet_long, aes(x = DATE, y = RH_pct, color = Station)) +
+    geom_line(linewidth = 0.5) +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black"),
+      legend.position = "bottom"
+    ) +
+    scale_color_brewer(palette = "Set1") +
+    labs(title = "Time Series Comparison of Relative Humidity",
+         subtitle = "Triplet Stations: WS7MET, VANMET, and H15MET",
+         x = "Date",
+         y = "Relative Humidity (%)")
+  
+  # Save the plots
+  ggsave(file.path(output_dir, "plots", "RH_comparison_WS7MET_vs_VANMET.png"), 
+         plot = p1, width = 8, height = 6, dpi = 300)
+  
+  ggsave(file.path(output_dir, "plots", "RH_comparison_WS7MET_vs_H15MET.png"), 
+         plot = p2, width = 8, height = 6, dpi = 300)
+  
+  ggsave(file.path(output_dir, "plots", "RH_comparison_VANMET_vs_H15MET.png"), 
+         plot = p3, width = 8, height = 6, dpi = 300)
+  
+  ggsave(file.path(output_dir, "plots", "RH_timeseries_triplet_stations.png"), 
+         plot = p4, width = 12, height = 6, dpi = 300)
+  
+  # Print model summaries
+  cat("\nRegression model for WS7MET vs VANMET:\n")
+  print(summary(model_ws7_van))
+  
+  cat("\nRegression model for WS7MET vs H15MET:\n")
+  print(summary(model_ws7_h15))
+  
+  cat("\nRegression model for VANMET vs H15MET:\n")
+  print(summary(model_van_h15))
+  
+  # Return the models in case they're needed
+  return(list(
+    model_ws7_van = model_ws7_van,
+    model_ws7_h15 = model_ws7_h15,
+    model_van_h15 = model_van_h15
+  ))
 }
 
 ####################################
@@ -485,6 +671,32 @@ interpolate_triplet <- function(data, site1, site2, site3, variable) {
   return(data)
 }
 
+# Function to constrain interpolated values (cap RH at 100%, precipitation at 0)
+constrain_interpolated_values <- function(data) {
+  # For RH: Cap values > 100% to exactly 100%
+  if ("RH_d_pct" %in% names(data)) {
+    over_100_count <- sum(data$RH_d_pct > 100, na.rm = TRUE)
+    if (over_100_count > 0) {
+      cat(paste0("Capping ", over_100_count, " RH values that were > 100% to exactly 100%\n"))
+      data <- data %>%
+        mutate(RH_d_pct = ifelse(RH_d_pct > 100, 100, RH_d_pct))
+    }
+  }
+  
+  # For precipitation: Cap negative values to 0
+  if ("P_mm_d" %in% names(data)) {
+    neg_precip_count <- sum(data$P_mm_d < 0, na.rm = TRUE)
+    if (neg_precip_count > 0) {
+      cat(paste0("Capping ", neg_precip_count, " precipitation values that were < 0 to exactly 0\n"))
+      data <- data %>%
+        mutate(P_mm_d = ifelse(P_mm_d < 0, 0, P_mm_d))
+    }
+  }
+  
+  return(data)
+}
+
+# Function to process all pairs, triplets and interpolate data
 # Function to process all pairs, triplets and interpolate data
 process_station_groups <- function(data, station_groups, variables) {
   # First process all the pairs
@@ -590,12 +802,25 @@ process_station_groups <- function(data, station_groups, variables) {
     }
   }
   
+  # Apply constraints to the interpolated data (cap RH at 100%, precip at 0)
+  interpolated_data <- constrain_interpolated_values(interpolated_data)
+  
+  # After all interpolation, calculate VPD from interpolated T and RH
+  # This ensures VPD is calculated using the interpolated temperature and humidity values
+  interpolated_data <- interpolated_data %>%
+    rowwise() %>%
+    mutate(VPD_kPa = if_else(!is.na(T_C) & !is.na(RH_d_pct), 
+                             calculate_vpd(T_C, RH_d_pct), 
+                             as.numeric(NA))) %>%
+    ungroup()
+  
   return(list(
     data = interpolated_data,
     interpolated_pairs = interpolated_pairs,
     interpolated_triplets = interpolated_triplets
   ))
 }
+
 
 # Modified function to create ONLY the watershed datasets (no met station data)
 create_watershed_datasets <- function(interpolated_data, site_mapping, variables) {
@@ -609,12 +834,18 @@ create_watershed_datasets <- function(interpolated_data, site_mapping, variables
     for (var_idx in seq_along(variables)) {
       var <- variables[var_idx]
       
-      # Skip if we're beyond the available mappings
-      if (var_idx > length(names(site_info))) {
+      # Skip if we're beyond the available mappings or handling VPD differently
+      if (var_idx > length(names(site_info)) && var != "VPD_kPa") {
         next
       }
       
-      var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
+      # For VPD, use the same station mapping as temperature
+      if (var == "VPD_kPa") {
+        var_name <- "temp"  # Use temperature stations for VPD
+      } else {
+        var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
+      }
+      
       stations <- site_info[[var_name]]
       
       if (length(stations) == 1) {
@@ -654,11 +885,180 @@ create_watershed_datasets <- function(interpolated_data, site_mapping, variables
       }
     }
     
-    ## Store the site dataset
+    # Store the site dataset
     site_datasets[[site_name]] <- site_data
   }
   
   return(site_datasets)
+}
+
+# Add this function to create comparison plots for specific triplet stations
+plot_triplet_station_comparisons <- function(interpolated_data) {
+  # Extract RH data for the specific stations
+  triplet_stations <- c("WS7MET", "VANMET", "H15MET")
+  
+  triplet_rh_data <- interpolated_data %>%
+    filter(SITECODE %in% triplet_stations) %>%
+    select(DATE, SITECODE, RH_d_pct) %>%
+    pivot_wider(names_from = SITECODE, values_from = RH_d_pct)
+  
+  # Remove rows where we don't have all stations data
+  complete_triplet_data <- triplet_rh_data %>%
+    filter(!is.na(WS7MET) & !is.na(VANMET) & !is.na(H15MET))
+  
+  # Create WS7MET vs VANMET plot
+  p1 <- ggplot(complete_triplet_data, aes(x = WS7MET, y = VANMET)) +
+    geom_point(alpha = 0.6, color = "blue") +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    ) +
+    labs(title = "Comparison of Relative Humidity",
+         subtitle = "WS7MET vs VANMET",
+         x = "WS7MET Relative Humidity (%)",
+         y = "VANMET Relative Humidity (%)")
+  
+  # Calculate R-squared for WS7MET vs VANMET
+  model_ws7_van <- lm(VANMET ~ WS7MET, data = complete_triplet_data)
+  r_squared_ws7_van <- summary(model_ws7_van)$r.squared
+  
+  # Add R-squared annotation to plot
+  p1 <- p1 + 
+    annotate("text", 
+             x = min(complete_triplet_data$WS7MET, na.rm = TRUE) + 
+               0.8 * (max(complete_triplet_data$WS7MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$WS7MET, na.rm = TRUE)),
+             y = min(complete_triplet_data$VANMET, na.rm = TRUE) + 
+               0.1 * (max(complete_triplet_data$VANMET, na.rm = TRUE) - 
+                        min(complete_triplet_data$VANMET, na.rm = TRUE)),
+             label = sprintf("R² = %.3f", r_squared_ws7_van),
+             hjust = 1, 
+             fontface = "bold")
+  
+  # Create WS7MET vs H15MET plot
+  p2 <- ggplot(complete_triplet_data, aes(x = WS7MET, y = H15MET)) +
+    geom_point(alpha = 0.6, color = "blue") +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    ) +
+    labs(title = "Comparison of Relative Humidity",
+         subtitle = "WS7MET vs H15MET",
+         x = "WS7MET Relative Humidity (%)",
+         y = "H15MET Relative Humidity (%)")
+  
+  # Calculate R-squared for WS7MET vs H15MET
+  model_ws7_h15 <- lm(H15MET ~ WS7MET, data = complete_triplet_data)
+  r_squared_ws7_h15 <- summary(model_ws7_h15)$r.squared
+  
+  # Add R-squared annotation to plot
+  p2 <- p2 + 
+    annotate("text", 
+             x = min(complete_triplet_data$WS7MET, na.rm = TRUE) + 
+               0.8 * (max(complete_triplet_data$WS7MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$WS7MET, na.rm = TRUE)),
+             y = min(complete_triplet_data$H15MET, na.rm = TRUE) + 
+               0.1 * (max(complete_triplet_data$H15MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$H15MET, na.rm = TRUE)),
+             label = sprintf("R² = %.3f", r_squared_ws7_h15),
+             hjust = 1, 
+             fontface = "bold")
+  
+  # Also create VANMET vs H15MET plot for completeness
+  p3 <- ggplot(complete_triplet_data, aes(x = VANMET, y = H15MET)) +
+    geom_point(alpha = 0.6, color = "blue") +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    ) +
+    labs(title = "Comparison of Relative Humidity",
+         subtitle = "VANMET vs H15MET",
+         x = "VANMET Relative Humidity (%)",
+         y = "H15MET Relative Humidity (%)")
+  
+  # Calculate R-squared for VANMET vs H15MET
+  model_van_h15 <- lm(H15MET ~ VANMET, data = complete_triplet_data)
+  r_squared_van_h15 <- summary(model_van_h15)$r.squared
+  
+  # Add R-squared annotation to plot
+  p3 <- p3 + 
+    annotate("text", 
+             x = min(complete_triplet_data$VANMET, na.rm = TRUE) + 
+               0.8 * (max(complete_triplet_data$VANMET, na.rm = TRUE) - 
+                        min(complete_triplet_data$VANMET, na.rm = TRUE)),
+             y = min(complete_triplet_data$H15MET, na.rm = TRUE) + 
+               0.1 * (max(complete_triplet_data$H15MET, na.rm = TRUE) - 
+                        min(complete_triplet_data$H15MET, na.rm = TRUE)),
+             label = sprintf("R² = %.3f", r_squared_van_h15),
+             hjust = 1, 
+             fontface = "bold")
+  
+  # Create time series comparison of all three stations
+  triplet_long <- triplet_rh_data %>%
+    pivot_longer(cols = c("WS7MET", "VANMET", "H15MET"), 
+                 names_to = "Station", 
+                 values_to = "RH_pct")
+  
+  p4 <- ggplot(triplet_long, aes(x = DATE, y = RH_pct, color = Station)) +
+    geom_line(linewidth = 0.5) +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black"),
+      legend.position = "bottom"
+    ) +
+    scale_color_brewer(palette = "Set1") +
+    labs(title = "Time Series Comparison of Relative Humidity",
+         subtitle = "Triplet Stations: WS7MET, VANMET, and H15MET",
+         x = "Date",
+         y = "Relative Humidity (%)")
+  
+  # Save the plots
+  ggsave(file.path(output_dir, "plots", "RH_comparison_WS7MET_vs_VANMET.png"), 
+         plot = p1, width = 8, height = 6, dpi = 300)
+  
+  ggsave(file.path(output_dir, "plots", "RH_comparison_WS7MET_vs_H15MET.png"), 
+         plot = p2, width = 8, height = 6, dpi = 300)
+  
+  ggsave(file.path(output_dir, "plots", "RH_comparison_VANMET_vs_H15MET.png"), 
+         plot = p3, width = 8, height = 6, dpi = 300)
+  
+  ggsave(file.path(output_dir, "plots", "RH_timeseries_triplet_stations.png"), 
+         plot = p4, width = 12, height = 6, dpi = 300)
+  
+  # Print model summaries
+  cat("\nRegression model for WS7MET vs VANMET:\n")
+  print(summary(model_ws7_van))
+  
+  cat("\nRegression model for WS7MET vs H15MET:\n")
+  print(summary(model_ws7_h15))
+  
+  cat("\nRegression model for VANMET vs H15MET:\n")
+  print(summary(model_van_h15))
+  
+  # Return the models in case they're needed
+  return(list(
+    model_ws7_van = model_ws7_van,
+    model_ws7_h15 = model_ws7_h15,
+    model_van_h15 = model_van_h15
+  ))
 }
 
 # After processing all sites, create a summary plot for each site
@@ -672,11 +1072,19 @@ create_site_summary_plots <- function(site_datasets, site_mapping, variables) {
       var <- variables[var_idx]
       
       # Handle the case where var_idx exceeds the number of variable mappings
-      if (var_idx <= length(names(site_info))) {
-        var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
-        stations <- site_info[[var_name]]
+      if (var_idx <= length(names(site_info)) || var == "VPD_kPa" || var == "Q_mm_d") {
+        # For VPD, use the temperature stations mapping
+        if (var == "VPD_kPa") {
+          var_name <- "temp"
+          stations <- site_info[["temp"]]
+        } else if (var == "Q_mm_d") {
+          var_name <- "discharge"
+          stations <- "N/A"
+        } else {
+          var_name <- names(site_info)[var_idx]  # temp, precip, rh, netrad
+          stations <- site_info[[var_name]]
+        }
       } else {
-        # For variables like Q_mm_d that don't have a mapping
         stations <- "N/A"
       }
       
@@ -686,6 +1094,7 @@ create_site_summary_plots <- function(site_datasets, site_mapping, variables) {
         "P_mm_d" = "Precipitation (mm/day)",
         "RH_d_pct" = "Relative Humidity (%)",
         "NR_Wm2_d" = "Net Radiation (W/m²)",
+        "VPD_kPa" = "Vapor Pressure Deficit (kPa)",
         "Q_mm_d" = "Discharge (mm/day)"
       )
       
@@ -699,6 +1108,14 @@ create_site_summary_plots <- function(site_datasets, site_mapping, variables) {
       
       if (var == "Q_mm_d") {
         subtitle <- "Discharge data from gauging station"
+      } else if (var == "VPD_kPa") {
+        if (length(stations) == 1) {
+          subtitle <- paste0("Calculated from temperature and RH at ", stations[1])
+        } else if (length(stations) == 2) {
+          subtitle <- paste0("Calculated from temperature and RH (average of ", paste(stations, collapse = ", "), ")")
+        } else {
+          subtitle <- paste0("Calculated from temperature and RH (average of ", paste(stations, collapse = ", "), ")")
+        }
       } else if (length(stations) == 1) {
         subtitle <- paste0("Data from ", stations[1])
       } else if (length(stations) == 2) {
@@ -729,7 +1146,7 @@ create_site_summary_plots <- function(site_datasets, site_mapping, variables) {
   }
 }
 
-# Modified main workflow function to only generate watershed data
+# Modified main workflow function to only generate watershed data and include VPD
 process_meteorological_data <- function(combined_met, site_mapping, variables) {
   # Clean any duplicates
   combined_met_clean <- combined_met %>%
@@ -752,6 +1169,7 @@ process_meteorological_data <- function(combined_met, site_mapping, variables) {
   }
   
   # Process pairs and triplets and interpolate data
+  # This now also calculates VPD from interpolated T and RH
   results <- process_station_groups(combined_met_clean, station_groups, variables)
   interpolated_data <- results$data
   interpolated_pairs <- results$interpolated_pairs
@@ -771,8 +1189,11 @@ process_meteorological_data <- function(combined_met, site_mapping, variables) {
     cat(sprintf("- %s, %s, and %s\n", triplet$site1, triplet$site2, triplet$site3))
   }
   
+  # Update variables to include VPD for watershed datasets
+  watershed_variables <- c(variables, "VPD_kPa")
+  
   # Create site-specific datasets (only watershed data, not met station data)
-  watershed_datasets <- create_watershed_datasets(interpolated_data, site_mapping, variables)
+  watershed_datasets <- create_watershed_datasets(interpolated_data, site_mapping, watershed_variables)
   
   # Combine all watershed datasets into one
   all_watersheds_data <- bind_rows(watershed_datasets)
@@ -943,6 +1364,7 @@ variable_mapping <- list(
 variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d")
 
 # Run the main process
+# VPD will be calculated after interpolating temperature and RH
 results <- process_meteorological_data(combined_met, site_mapping, variables)
 
 # Extract the results
@@ -956,8 +1378,8 @@ interpolated_triplets <- results$interpolated_triplets
 discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv"))
 watershed_datasets <- add_discharge_to_watersheds(watershed_datasets, discharge)
 
-# Update variables to include discharge
-variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "Q_mm_d")
+# Update variables to include discharge and VPD
+variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "VPD_kPa", "Q_mm_d")
 
 # Combine updated watershed datasets
 all_watersheds_data <- bind_rows(watershed_datasets)
@@ -984,8 +1406,13 @@ summary_stats <- all_watersheds_data %>%
 print("Summary statistics by watershed:")
 print(summary_stats)
 
+
+# Create specific triplet comparison plots for RH
+triplet_models <- plot_triplet_station_comparisons(interpolated_data)
+
 # Create summary time series plots for each watershed
 create_site_summary_plots(watershed_datasets, site_mapping, variables)
+
 
 # Ensure columns are in the correct order: DATE, SITECODE, then others
 all_watersheds_data <- all_watersheds_data %>%
@@ -993,6 +1420,12 @@ all_watersheds_data <- all_watersheds_data %>%
 
 # Write the watersheds data to files (NOT the met station data)
 write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_data_q.csv"))
+
+# # Write individual watershed files with VPD
+# for (site_name in names(watershed_datasets)) {
+#   write_csv(watershed_datasets[[site_name]], 
+#             file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
+# }
 
 # Print completion message
 cat("\nProcessing complete! Results saved to:\n")

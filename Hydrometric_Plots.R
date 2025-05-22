@@ -10,6 +10,8 @@ library(multcompView)   # for compact letter display after Tukey HSD
 
 theme_set(theme_classic(base_size = 14))
 
+rm(list = ls())
+
 # ─── Directories & your new site order ────────────────────────────────────────
 base_dir   <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/03_Data"
 output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs"
