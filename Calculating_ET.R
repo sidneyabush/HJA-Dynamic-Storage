@@ -260,7 +260,6 @@ water_balance_export <- results_complete %>%
   transmute(
     DATE,
     SITECODE,
-    T_C = T_C,
     P_mm_day = P_mm_d,
     Q_mm_day = Q_mm_d,
     ET_mm_day = ET_PT_zhang

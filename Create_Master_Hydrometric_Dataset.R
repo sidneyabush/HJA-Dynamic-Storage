@@ -1381,7 +1381,38 @@ watershed_datasets <- add_discharge_to_watersheds(watershed_datasets, discharge)
 # Update variables to include discharge and VPD
 variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "VPD_kPa", "Q_mm_d")
 
-# Combine updated watershed datasets
+# ---- 1. Define component sites for each elevation ----
+gslook_components <- c("GSWS01", "GSWS06", "LONGER", "COLD")
+
+# ---- 2. Create the GSLOOK_FULL composite (average of components; Q_mm_d not present yet) ----
+gslook_full_df <- all_watersheds_data %>%
+  filter(SITECODE %in% gslook_components) %>%
+  group_by(DATE) %>%
+  summarise(
+    across(where(is.numeric), ~mean(.x, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  mutate(SITECODE = "GSLOOK_FULL") %>%
+  select(DATE, SITECODE, everything())
+
+# ---- 3. Add discharge from GSLOOK site only (Q_mm_d) ----
+gslook_q <- all_watersheds_data %>%
+  filter(SITECODE == "GSLOOK") %>%
+  select(DATE, Q_mm_d)
+
+# Add Q_mm_d to GSLOOK_FULL
+gslook_full_df <- gslook_full_df %>%
+  select(-Q_mm_d, everything()) %>%  # in case the averaging created a (mostly NA) Q_mm_d
+  left_join(gslook_q, by = "DATE")
+
+# ---- 4. Combine with all other watersheds ----
+all_watersheds_data <- all_watersheds_data %>%
+  filter(SITECODE != "GSLOOK_FULL") %>%
+  bind_rows(gslook_full_df)
+
+watershed_datasets[["GSLOOK_FULL"]] <- gslook_full_df
+
+# Combine updated watershed datasets (ensures all have Q_mm_d)
 all_watersheds_data <- bind_rows(watershed_datasets)
 
 # Check for NAs in the watershed data
