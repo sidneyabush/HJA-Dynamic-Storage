@@ -34,6 +34,10 @@ discharge <- read_csv(file.path(base_dir, "Q", "HF00402_v14.csv")) %>%
   ) %>%
   arrange(SITECODE, Date)
 
+# Need to update this function to take the log-log: 
+# lm_model <- lm(log(recession_slope) ~ log(Q), data = recession_data)
+
+
 # 1) Recession slope
 calc_recession <- function(df) {
   tmp <- df %>%
@@ -45,16 +49,16 @@ calc_recession <- function(df) {
     filter(!is.na(dQ_dt), change_ratio >= 0.7, dQ < 0) %>%
     mutate(recession_slope = -dQ_dt)
   
-  tibble(slope = coef(lm(recession_slope ~ Q, data = tmp))[2])
+  tibble(slope = coef(lm(log(recession_slope) ~ log(Q), data = tmp))[2])
 }
 
-# 2) RBFI
-calc_rbfi <- function(df) {
+# 2) RBI
+calc_RBI <- function(df) {
   tmp     <- df %>% mutate(dQ = Q - lag(Q)) %>% filter(!is.na(dQ))
   total_Q <- sum(df$Q, na.rm = TRUE)
   props   <- abs(tmp$dQ) / total_Q
   
-  tibble(RBFI = sum(props, na.rm = TRUE))
+  tibble(RBI = sum(props, na.rm = TRUE))
 }
 
 # Compute annual metrics
@@ -63,7 +67,7 @@ annual_metrics <- discharge %>%
   group_map(~ bind_cols(
     tibble(site = .y$SITECODE, year = .y$WATERYEAR),
     calc_recession(.x),
-    calc_rbfi(.x)
+    calc_RBI(.x)
   )) %>%
   bind_rows() %>%
   mutate(site = factor(site, levels = sites_keep))
@@ -103,7 +107,7 @@ palette10 <- c(
 site_cols <- setNames(lighten(palette10, amount = 0.1), sites_keep)
 
 # 1) Annual RBI by site
-p_rbfi <- ggplot(annual_metrics, aes(year, RBFI, color = site, fill = site)) +
+p_RBI <- ggplot(annual_metrics, aes(year, RBI, color = site, fill = site)) +
   geom_line(size = 0.6) +
   geom_point(size = 1) +
   facet_wrap(~ site, ncol = 2) +
@@ -116,7 +120,7 @@ p_rbfi <- ggplot(annual_metrics, aes(year, RBFI, color = site, fill = site)) +
     strip.background = element_rect(fill = "white", colour = NA),
     strip.text       = element_text(color = "black")
   )
-ggsave("rbfi_by_site_wy.png", p_rbfi, path = output_dir,
+ggsave("RBI_by_site_wy.png", p_RBI, path = output_dir,
        width = 8, height = 9, units = "in", dpi = 300)
 
 # 2) Annual recession‐curve slope by site
@@ -170,9 +174,9 @@ ggsave("recession_curve_by_site_mmday.png", p_curve, path = output_dir,
 
 
 summary_site <- annual_metrics %>%
-  select(site, RBFI, slope) %>%
+  select(site, RBI, slope) %>%
   pivot_longer(
-    cols        = c(RBFI, slope),
+    cols        = c(RBI, slope),
     names_to    = "metric",
     values_to   = "value"
   ) %>%
@@ -193,7 +197,7 @@ p_summary <- ggplot(summary_site, aes(x = site, y = mean_val, color = site)) +
     scales   = "free_y",
     ncol     = 1,     # stack panels vertically
     labeller = labeller(metric = c(
-      RBFI  = "Richards–Baker Index",
+      RBI  = "Richards–Baker Index",
       slope = "Recession Limb Slope"
     ))
   ) +
