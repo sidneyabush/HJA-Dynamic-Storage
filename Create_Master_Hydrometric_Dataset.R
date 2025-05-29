@@ -1182,8 +1182,8 @@ add_discharge_to_watersheds <- function(watershed_datasets, discharge) {
     filter(!is.na(DA_M2)) %>%
     mutate(
       Date = as.Date(DATE, "%m/%d/%Y"),
-      Q = MEAN_Q * 0.02831683199881,  # m³/s
-      Q_mm_d = (Q * 86400) / (DA_M2 * 1000000) * 1000  # Convert to mm/day
+      Q = MEAN_Q * 0.02831683199881,  
+      Q_mm_d = (Q * 86400) / (DA_M2) * 1000  
     ) %>%
     select(Date, SITECODE, Q_mm_d) %>%
     rename(DATE = Date)
