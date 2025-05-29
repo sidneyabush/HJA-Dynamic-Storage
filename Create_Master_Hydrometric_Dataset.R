@@ -6,10 +6,6 @@ library(ggplot2)
 
 rm(list = ls())
 
-
-#############################
-# PART 1: HELPER FUNCTIONS  #
-#############################
 # Date parsing function
 parse_my_date <- function(d) {
   parse_date_time(d,
@@ -17,19 +13,17 @@ parse_my_date <- function(d) {
   ) %>% as_date()
 }
 
-# Function for loading data that uses _inter columns
 make_inter_long <- function(fname, var) {
   read_csv(file.path(met_dir, fname), show_col_types = FALSE) %>%
     mutate(DATE = parse_my_date(DATE)) %>%
     pivot_longer(
       cols         = ends_with("_inter"),
       names_to     = "SITECODE",
-      names_pattern= "(.*)_inter$",     # ← capture everything before "_inter"
-      values_to    = var                # ← e.g. "Temp" or "Precip"
+      names_pattern= "(.*)_inter$",     
+      values_to    = var                
     )
 }
 
-# Function to read GSMACK precipitation data
 read_mack_precip <- function(fname) {
   read_csv(file.path(met_dir, fname), show_col_types = FALSE) %>%
     mutate(DATE = parse_my_date(DATE)) %>%
@@ -38,21 +32,14 @@ read_mack_precip <- function(fname) {
     rename(P_mm_d = PRECIP_TOT_DAY)  # Rename to match your naming convention
 }
 
-# Function to calculate VPD from temperature and relative humidity
 calculate_vpd <- function(temp_celsius, rh_percent) {
   # Calculate saturation vapor pressure (kPa) using temperature
   es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
-  
-  # Calculate actual vapor pressure (kPa)
   ea <- es * (rh_percent / 100)
-  
-  # Calculate vapor pressure deficit (kPa)
   vpd <- es - ea
-  
   return(vpd)
 }
 
-# Function for better formatted plots
 create_relationship_plot <- function(data, site1, site2, variable, r_squared, complete_count) {
   site1_col <- paste0(site1)
   site2_col <- paste0(site2)
@@ -80,16 +67,10 @@ create_relationship_plot <- function(data, site1, site2, variable, r_squared, co
   return(p)
 }
 
-# Function to create a multiple regression model plot
 create_multiple_regression_plot <- function(target_site, predictor_sites, variable, model_summary, complete_count) {
-  # Create a base plot title and subtitle
   title <- paste("Multiple Regression Model for", variable)
   subtitle <- paste(target_site, "predicted from", paste(predictor_sites, collapse = ", "))
-  
-  # Prepare the actual data used in the model
   model_data <- environment(model_summary$call)$data
-  
-  # Create a data frame for the model information
   model_info <- data.frame(
     Metric = c("R²", "Adjusted R²", "F-statistic", "p-value", "Sample Size"),
     Value = c(
@@ -119,22 +100,16 @@ create_multiple_regression_plot <- function(target_site, predictor_sites, variab
   # Create the plot
   p <- ggplot() +
     theme_minimal(base_size = 12) +
-    
-    # Model Information Section
     annotate("text", x = 0.5, y = 0.9, label = title, 
              fontface = "bold", size = 5, hjust = 0.5) +
     annotate("text", x = 0.5, y = 0.85, label = subtitle, 
              fontface = "italic", size = 4, hjust = 0.5) +
-    
-    # Model Metrics Table
     annotate("text", x = 0.5, y = 0.75, label = "Model Metrics:", 
              fontface = "bold", size = 4, hjust = 0.5) +
     annotate("text", x = 0.3, y = 0.7, label = paste(model_info$Metric, collapse = "\n"), 
              hjust = 1, size = 3) +
     annotate("text", x = 0.7, y = 0.7, label = paste(model_info$Value, collapse = "\n"), 
              hjust = 0, size = 3) +
-    
-    # Coefficients Table
     annotate("text", x = 0.5, y = 0.5, label = "Coefficients:", 
              fontface = "bold", size = 4, hjust = 0.5) +
     annotate("text", x = 0.2, y = 0.45, 
@@ -146,8 +121,6 @@ create_multiple_regression_plot <- function(target_site, predictor_sites, variab
     annotate("text", x = 0.6, y = 0.45, 
              label = paste(c("p-value", format.pval(coef_info$`Pr(>|t|)`, digits = 3)), collapse = "\n"), 
              hjust = 0, size = 3) +
-    
-    # Create a plot area
     xlim(0, 1) +
     ylim(0, 1) +
     theme(
@@ -161,9 +134,7 @@ create_multiple_regression_plot <- function(target_site, predictor_sites, variab
   return(p)
 }
 
-# Add this function to create comparison plots for specific triplet stations
 plot_triplet_station_comparisons <- function(interpolated_data) {
-  # Extract RH data for the specific stations
   triplet_stations <- c("WS7MET", "VANMET", "H15MET")
   
   triplet_rh_data <- interpolated_data %>%
@@ -196,7 +167,6 @@ plot_triplet_station_comparisons <- function(interpolated_data) {
   model_ws7_van <- lm(VANMET ~ WS7MET, data = complete_triplet_data)
   r_squared_ws7_van <- summary(model_ws7_van)$r.squared
   
-  # Add R-squared annotation to plot
   p1 <- p1 + 
     annotate("text", 
              x = min(complete_triplet_data$WS7MET, na.rm = TRUE) + 
@@ -229,8 +199,6 @@ plot_triplet_station_comparisons <- function(interpolated_data) {
   # Calculate R-squared for WS7MET vs H15MET
   model_ws7_h15 <- lm(H15MET ~ WS7MET, data = complete_triplet_data)
   r_squared_ws7_h15 <- summary(model_ws7_h15)$r.squared
-  
-  # Add R-squared annotation to plot
   p2 <- p2 + 
     annotate("text", 
              x = min(complete_triplet_data$WS7MET, na.rm = TRUE) + 
@@ -243,7 +211,7 @@ plot_triplet_station_comparisons <- function(interpolated_data) {
              hjust = 1, 
              fontface = "bold")
   
-  # Also create VANMET vs H15MET plot for completeness
+  # Also create VANMET vs H15MET plot 
   p3 <- ggplot(complete_triplet_data, aes(x = VANMET, y = H15MET)) +
     geom_point(alpha = 0.6, color = "blue") +
     geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1) +
@@ -263,8 +231,6 @@ plot_triplet_station_comparisons <- function(interpolated_data) {
   # Calculate R-squared for VANMET vs H15MET
   model_van_h15 <- lm(H15MET ~ VANMET, data = complete_triplet_data)
   r_squared_van_h15 <- summary(model_van_h15)$r.squared
-  
-  # Add R-squared annotation to plot
   p3 <- p3 + 
     annotate("text", 
              x = min(complete_triplet_data$VANMET, na.rm = TRUE) + 
@@ -330,9 +296,6 @@ plot_triplet_station_comparisons <- function(interpolated_data) {
   ))
 }
 
-####################################
-# PART 2: DATA PROCESSING FUNCTIONS #
-####################################
 # Extract all required station pairs and triplets that need interpolation
 extract_station_groups <- function(site_mapping) {
   pairs <- list()
@@ -1443,16 +1406,11 @@ summary_stats <- all_watersheds_data %>%
                      n = ~sum(!is.na(.))
                    )))
 
-print("Summary statistics by watershed:")
-print(summary_stats)
-
-
 # Create specific triplet comparison plots for RH
 triplet_models <- plot_triplet_station_comparisons(interpolated_data)
 
 # Create summary time series plots for each watershed
 create_site_summary_plots(watershed_datasets, site_mapping, variables)
-
 
 # Ensure columns are in the correct order: DATE, SITECODE, then others
 all_watersheds_data <- all_watersheds_data %>%
@@ -1466,8 +1424,3 @@ write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_dat
 #   write_csv(watershed_datasets[[site_name]], 
 #             file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
 # }
-
-# Print completion message
-cat("\nProcessing complete! Results saved to:\n")
-cat(paste0("Watershed CSV files: ", file.path(output_dir, "data"), "\n"))
-cat(paste0("Plot files: ", file.path(output_dir, "plots"), "\n"))
