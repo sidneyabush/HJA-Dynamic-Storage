@@ -16,18 +16,24 @@ dir.create(plot_dir, showWarnings = FALSE, recursive = TRUE)
 # Import all_watersheds_data
 all_watersheds_data <- read_csv(file.path(input_dir, "watersheds_met_data_q.csv"))
 
-# THEORETICAL ALPHA FUNCTIONS (Zhang et al. 2016)
+# THEORETICAL ALPHA FUNCTIONS (Zhang et al. 2024): 
+# https://hess.copernicus.org/articles/28/4349/2024/hess-28-4349-2024.html 
+
 calculate_specific_humidity <- function(temp_celsius, rh_percent, pressure_kpa = 101.325) {
   es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
   e <- es * (rh_percent / 100)
   q <- 0.622 * e / (pressure_kpa - 0.378 * e)
   return(q)
 }
+
+#  Equation 17 
 calculate_delta <- function(temp_celsius) {
   es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
   delta <- 4098 * es / ((temp_celsius + 237.3)^2)
   return(delta)
 }
+
+# Equation 9
 calculate_bowen_ratio_simplified <- function(temp_celsius, q_specific) {
   cp <- 1005  # J/kg/K
   lambda_v <- (2.501 - 0.002361 * temp_celsius) * 1e6  # J/kg
@@ -38,17 +44,20 @@ calculate_bowen_ratio_simplified <- function(temp_celsius, q_specific) {
   Bo <- pmax(0.1, pmin(2.0, Bo))
   return(Bo)
 }
+
+# Equation 12
 calculate_alpha_theoretical <- function(temp_celsius, rh_percent, pressure_kpa = 101.325) {
   q_specific <- calculate_specific_humidity(temp_celsius, rh_percent, pressure_kpa)
   delta <- calculate_delta(temp_celsius)
   gamma <- 0.067  # kPa/°C at sea level
   Bo <- calculate_bowen_ratio_simplified(temp_celsius, q_specific)
   alpha <- (1 + Bo) * (delta / (delta + gamma))
-  # alpha <- pmax(0.9, pmin(1.4, alpha))
+  # alpha <- pmax(0.9, pmin(1.4, alpha)) 
   return(alpha)
 }
 
-# SZILAGYI et al. (2014) α(T) FUNCTION
+# This is a formula I tried, but am no longer using. Using Zhang method.
+# SZILAGYI et al. (2014) alpha(T) FUNCTION
 calculate_alpha_szilagyi <- function(temp_celsius) {
   alpha <- -3.89e-6 * temp_celsius^3 +
     4.78e-4 * temp_celsius^2 -
@@ -109,18 +118,21 @@ results$ET_PT_fixed_1.26 <- calculate_et_pt(
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
+
 results$ET_PT_fixed_0.9 <- calculate_et_pt(
   alpha = 0.9,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
+
 results$ET_PT_zhang <- calculate_et_pt(
   alpha = results$alpha_theoretical_weekly,
   net_radiation_wm2 = results$NR_Wm2_d,
   temp_celsius = results$T_C,
   rh_percent = results$RH_d_pct
 )
+
 results$ET_PT_szilagyi <- calculate_et_pt(
   alpha = results$alpha_szilagyi,
   net_radiation_wm2 = results$NR_Wm2_d,
@@ -140,7 +152,7 @@ et_long <- results_complete %>%
   ) %>%
   mutate(Method = factor(Method, 
                          levels = c("ET_PT_fixed_1.26", "ET_PT_fixed_0.9", "ET_PT_zhang", "ET_PT_szilagyi"),
-                         labels = c("Fixed 1.26", "Fixed 0.9", "Zhang et al. (2016) α(T_RH)", "Szilagyi et al. (2014) α(T)")
+                         labels = c("Fixed 1.26", "Fixed 0.9", "Zhang et al. (2024) α(T_RH)", "Szilagyi et al. (2014) α(T)")
   ))
 
 # Add the alpha values (for plotting)
@@ -162,23 +174,23 @@ alpha_long <- results_complete %>%
   ) %>%
   mutate(Method = factor(Method,
                          levels = c("alpha_fixed_1.26", "alpha_fixed_0.9", "alpha_zhang", "alpha_szilagyi"),
-                         labels = c("Fixed 1.26", "Fixed 0.9", "Zhang et al. (2016) α(T_RH)", "Szilagyi et al. (2014) α(T)")
+                         labels = c("Fixed 1.26", "Fixed 0.9", "Zhang et al. (2024) α(T_RH)", "Szilagyi et al. (2014) α(T)")
   ))
 
 
-# Export one plot per SITECODE (only color, no linetype)
+# Export one plot per SITECODE 
 site_list <- unique(et_long$SITECODE)
 for (site in site_list) {
   p <- ggplot(filter(et_long, SITECODE == site),
               aes(x = DATE, y = ET_mm_day, color = Method)) +
-    geom_line(size = 0.7, alpha = 0.93) +  # thinner lines
+    geom_line(size = 0.7, alpha = 0.93) +  
     labs(
       title = paste0("Daily ET Comparison at ", site),
       x = "Date",
       y = "ET (mm/day)",
       color = "Method"
     ) +
-    theme_bw(base_size = 15) +  # white background
+    theme_bw(base_size = 15) +  
     theme(
       legend.position = "bottom",
       strip.text = element_text(face = "bold"),
@@ -187,8 +199,6 @@ for (site in site_list) {
     )
   ggsave(file.path(plot_dir, paste0("ET_methods_comparison_", site, ".png")), p, width = 10, height = 6)
 }
-
-cat("\nExported daily ET comparison plots for each SITECODE to:\n", plot_dir, "\n")
 
 
 # Export one alpha plot per SITECODE
@@ -220,7 +230,7 @@ et_long <- et_long %>%
     month = month(DATE, label = TRUE, abbr = TRUE)
   )
 
-# Summarize mean daily ET by month, method, and site
+# Summarize mean daily ET by month, method, and site to compare to HJA values
 et_monthly_summary <- et_long %>%
   group_by(SITECODE, Method, month) %>%
   summarise(
@@ -233,29 +243,18 @@ et_monthly_summary <- et_long %>%
 # Preview result
 print(head(et_monthly_summary, 15))
 
-
 # Final dataset: Only Zhang method, all variables retained
 zhang_export <- results_complete %>%
-  # Keep all columns, but add clear column names for Zhang alpha and ET
   mutate(
-    zhang_alpha = alpha_theoretical_weekly,       # explicitly name the Zhang weekly alpha
-    ET_PT_zhang = ET_PT_zhang                    # daily PT-ET using Zhang alpha (already present, for clarity)
+    zhang_alpha = alpha_theoretical_weekly,      
+    ET_PT_zhang = ET_PT_zhang                   
   ) %>%
-  # Optionally, select or arrange columns as you prefer, or keep all
   select(DATE, SITECODE, everything())
 
 # Export to CSV
 write_csv(zhang_export, file.path(output_dir, "daily_ET_watersheds_zhang_alpha.csv"))
 
-cat("\nExported final daily Zhang dataset to:\n",
-    file.path(output_dir, "daily_ET_watersheds_zhang_alpha.csv"), "\n")
-
-
 # ---- Export daily water balance file: Date, SITECODE, P, Q, ET ----
-
-# Confirm your variable names for P and Q (adjust if needed)
-# Here assuming columns are named: P_mm_d, Q_mm_day, ET_PT_zhang
-
 water_balance_export <- results_complete %>%
   transmute(
     DATE,
@@ -266,7 +265,4 @@ water_balance_export <- results_complete %>%
   )
 
 write_csv(water_balance_export, file.path(output_dir, "daily_water_balance_zhang.csv"))
-
-cat("\nExported daily water balance dataset to:\n",
-    file.path(output_dir, "daily_water_balance_zhang.csv"), "\n")
 
