@@ -182,20 +182,16 @@ data <- data %>%
 # --- 11. Export the fully‐filled daily water‐balance record (no Hamon gaps) ---
 write_csv(
   data,
-  file.path(output_dir, "daily_water_balance_all_ET_methods_1997_present.csv")
+  file.path(output_dir, "daily_MET_water_balance_all_ET_methods_1997_present.csv")
 )
 
 # --- 12. Drop all the temporary coefficient & prediction columns ---
-met_data <- data %>%
-  select(-contains("coef"),
-         -contains("alpha"),
-         -contains("interpolated"),
-         -contains("pred"),
-         -MONTH
+WB_data <- data %>%
+  select(-RH_d_pct, -NR_Wm2_d,-VPD_kPa
   )
 
 # --- 13. Export the fully‐filled daily water‐balance record (no Hamon gaps) ---
 write_csv(
-  met_data,
+  WB_data,
   file.path(output_dir, "daily_water_balance_all_ET_methods_1997_present.csv")
 )
