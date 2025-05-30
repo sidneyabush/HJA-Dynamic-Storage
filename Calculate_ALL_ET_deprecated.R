@@ -1,3 +1,4 @@
+# --- LOAD PACKAGES ---
 library(readr)
 library(dplyr)
 library(lubridate)
@@ -6,33 +7,30 @@ library(ggplot2)
 
 rm(list = ls())
 
-# Set data directories
+# --- SET DIRECTORIES ---
 input_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs/MET/data"
 output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs/ET"
 plot_dir <- file.path(output_dir, "plots")
 alpha_plot_dir <- file.path(plot_dir, "PT_alpha")
 et_plot_dir <- file.path(plot_dir, "ET_methods_comparison")
 
-# Create all directories
 dir.create(plot_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(alpha_plot_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(et_plot_dir, showWarnings = FALSE, recursive = TRUE)
 
-# Import all_watersheds_data
+# --- IMPORT DATA ---
 all_watersheds_data <- read_csv(file.path(input_dir, "watersheds_met_data_q.csv"))
 
-# HAMON COEFFICIENT CALIBRATION FUNCTIONS
+# --- HAMON COEFFICIENT CALIBRATION FUNCTIONS ---
 calibrate_hamon_coefficient <- function(data, pt_method = "ET_PT_zhang", 
                                         calibration_period = c("2013-01-01", "2019-12-31"),
                                         by_day = FALSE, by_week = TRUE) {
-  
   cal_data <- data %>%
     filter(DATE >= as.Date(calibration_period[1]) & 
              DATE <= as.Date(calibration_period[2])) %>%
     filter(!is.na(.data[[pt_method]]) & !is.na(ET_Hamon_uncalibrated))
   
   if (by_day) {
-    # Daily calibration coefficients
     daily_coefs <- cal_data %>%
       group_by(SITECODE, DATE) %>%
       summarise(
@@ -40,11 +38,8 @@ calibrate_hamon_coefficient <- function(data, pt_method = "ET_PT_zhang",
         .groups = "drop"
       ) %>%
       filter(!is.na(coefficient) & is.finite(coefficient))
-    
     return(daily_coefs)
-    
   } else if (by_week) {
-    # Weekly calibration coefficients
     weekly_coefs <- cal_data %>%
       mutate(week_start = floor_date(DATE, "week")) %>%
       group_by(SITECODE, week_start) %>%
@@ -55,11 +50,8 @@ calibrate_hamon_coefficient <- function(data, pt_method = "ET_PT_zhang",
         .groups = "drop"
       ) %>%
       filter(n_obs >= 4)
-    
     return(weekly_coefs)
-    
   } else {
-    # Annual calibration coefficient
     annual_coefs <- cal_data %>%
       group_by(SITECODE) %>%
       summarise(
@@ -68,15 +60,12 @@ calibrate_hamon_coefficient <- function(data, pt_method = "ET_PT_zhang",
         rmse_uncalibrated = sqrt(mean((.data[[pt_method]] - ET_Hamon_uncalibrated)^2, na.rm = TRUE)),
         .groups = "drop"
       )
-    
     return(annual_coefs)
   }
 }
 
 apply_hamon_calibration <- function(data, calibration_coefs, by_day = FALSE, by_week = TRUE) {
-  
   if (by_day) {
-    # Apply daily coefficients
     data <- data %>%
       left_join(calibration_coefs %>% select(SITECODE, DATE, coefficient), 
                 by = c("SITECODE", "DATE")) %>%
@@ -85,9 +74,7 @@ apply_hamon_calibration <- function(data, calibration_coefs, by_day = FALSE, by_
         ET_Hamon_calibrated = ifelse(is.na(coefficient), ET_Hamon_uncalibrated * 0.1651, ET_Hamon_calibrated)
       ) %>%
       select(-coefficient)
-    
   } else if (by_week) {
-    # Apply weekly coefficients
     data <- data %>%
       mutate(week_start = floor_date(DATE, "week")) %>%
       left_join(calibration_coefs %>% select(SITECODE, week_start, coefficient), 
@@ -97,9 +84,7 @@ apply_hamon_calibration <- function(data, calibration_coefs, by_day = FALSE, by_
         ET_Hamon_calibrated = ifelse(is.na(coefficient), ET_Hamon_uncalibrated * 0.1651, ET_Hamon_calibrated)
       ) %>%
       select(-week_start, -coefficient)
-    
   } else {
-    # Apply annual coefficient
     data <- data %>%
       left_join(calibration_coefs %>% select(SITECODE, coefficient), 
                 by = "SITECODE") %>%
@@ -109,20 +94,14 @@ apply_hamon_calibration <- function(data, calibration_coefs, by_day = FALSE, by_
       ) %>%
       select(-coefficient)
   }
-  
   return(data)
 }
 
-# Function to create linear interpolation relationship between Zhang and Hamon
 create_linear_interpolation <- function(data, calibration_period = c("2013-01-01", "2019-12-31")) {
-  
-  # Filter to calibration period where both methods exist
   cal_data <- data %>%
     filter(DATE >= as.Date(calibration_period[1]) & 
              DATE <= as.Date(calibration_period[2])) %>%
     filter(!is.na(ET_PT_zhang) & !is.na(ET_Hamon_uncalibrated))
-  
-  # Create linear model for each site: Hamon_uncalibrated = slope * Zhang + intercept
   linear_models <- cal_data %>%
     group_by(SITECODE) %>%
     summarise(
@@ -133,29 +112,22 @@ create_linear_interpolation <- function(data, calibration_period = c("2013-01-01
       .groups = "drop"
     ) %>%
     select(-model_data)
-  
   return(linear_models)
 }
 
-# Function to apply linear interpolation to estimate Hamon from Zhang
 apply_linear_interpolation <- function(data, linear_models) {
-  
   data <- data %>%
     left_join(linear_models, by = "SITECODE") %>%
     mutate(
-      # Calculate Hamon from Zhang using linear relationship
       ET_Hamon_linear = slope * ET_PT_zhang + intercept,
-      # Use original uncalibrated Hamon where Zhang doesn't exist, linear where it does
       ET_Hamon_linear = ifelse(!is.na(ET_PT_zhang), ET_Hamon_linear, ET_Hamon_uncalibrated),
-      # Clean up temporary variables
       ET_Hamon_linear = pmax(0, ET_Hamon_linear, na.rm = TRUE)
     ) %>%
     select(-slope, -intercept, -r_squared)
-  
   return(data)
 }
 
-# HAMON (1963) ET CALCULATION
+# --- HAMON (1963) ET CALCULATION ---
 calculate_et_hamon <- function(temp_celsius, date_vector, latitude = 44.24, coefficient = 0.1651) {
   day_of_year <- yday(as.Date(date_vector))
   declination <- 0.4093 * sin((2 * pi * day_of_year / 365) - 1.405)
@@ -171,7 +143,7 @@ calculate_et_hamon <- function(temp_celsius, date_vector, latitude = 44.24, coef
   return(pmax(0, et_hamon))
 }
 
-# ALPHA FUNCTIONS
+# --- ALPHA FUNCTIONS ---
 calculate_specific_humidity <- function(temp_celsius, rh_percent, pressure_kpa = 101.325) {
   es <- 0.6108 * exp(17.27 * temp_celsius / (temp_celsius + 237.3))
   e <- es * (rh_percent / 100)
@@ -229,7 +201,6 @@ calculate_et_pt <- function(alpha, net_radiation_wm2, temp_celsius, rh_percent) 
 calculate_weekly_theoretical_alpha <- function(data) {
   data$DATE <- as.Date(data$DATE)
   data$week_start <- floor_date(data$DATE, "week")
-  
   weekly_stats <- data %>%
     group_by(SITECODE, week_start) %>%
     summarise(
@@ -239,29 +210,26 @@ calculate_weekly_theoretical_alpha <- function(data) {
       .groups = 'drop'
     ) %>%
     filter(n_days >= 4)
-  
   weekly_stats$alpha_theoretical_weekly <- mapply(
     calculate_alpha_theoretical,
     temp_celsius = weekly_stats$T_C_weekly,
     rh_percent = weekly_stats$RH_weekly
   )
-  
   data <- data %>%
     left_join(
       weekly_stats %>%
         select(SITECODE, week_start, alpha_theoretical_weekly),
       by = c("SITECODE", "week_start")
     )
-  
   return(data)
 }
 
-# MAIN WORKFLOW
+# --- MAIN WORKFLOW ---
+
 results <- all_watersheds_data
 results <- calculate_weekly_theoretical_alpha(results)
 results$alpha_szilagyi <- sapply(results$T_C, calculate_alpha_szilagyi)
 
-# Calculate PT methods
 results$ET_PT_zhang <- calculate_et_pt(
   alpha = results$alpha_theoretical_weekly,
   net_radiation_wm2 = results$NR_Wm2_d,
@@ -276,7 +244,6 @@ results$ET_PT_szilagyi <- calculate_et_pt(
   rh_percent = results$RH_d_pct
 )
 
-# Calculate Hamon
 study_latitude <- (44.20127400 + 44.28226000) / 2
 
 results$ET_Hamon_uncalibrated <- calculate_et_hamon(
@@ -286,7 +253,7 @@ results$ET_Hamon_uncalibrated <- calculate_et_hamon(
   coefficient = 0.1651
 )
 
-# Calibrate Hamon
+# --- Calibrate Hamon to Zhang ---
 daily_calibration <- calibrate_hamon_coefficient(
   data = results,
   pt_method = "ET_PT_zhang",
@@ -312,12 +279,10 @@ if (nrow(sites_with_daily_cal) > 0) {
     calibration_period = c("2013-01-01", "2019-12-31"),
     by_week = TRUE
   )
-  
   sites_with_weekly_cal <- weekly_calibration %>%
     group_by(SITECODE) %>%
     summarise(weeks_available = n()) %>%
     filter(weeks_available >= 26)
-  
   if (nrow(sites_with_weekly_cal) > 0) {
     results <- apply_hamon_calibration(
       data = results,
@@ -344,30 +309,131 @@ if (nrow(sites_with_daily_cal) > 0) {
 
 results$ET_Hamon <- results$ET_Hamon_calibrated
 
-# Create linear interpolation relationship between Zhang and Hamon uncalibrated
-linear_models <- create_linear_interpolation(results, calibration_period = c("2013-01-01", "2019-12-31"))
+# --- Create linear interpolation (Zhang) ---
+linear_models_zhang <- create_linear_interpolation(results, calibration_period = c("2013-01-01", "2019-12-31"))
 
-# Apply linear interpolation to create Hamon linear estimates
-results <- apply_linear_interpolation(results, linear_models)
+results <- apply_linear_interpolation(results, linear_models_zhang)
 
-# Filter for complete cases
-results_complete <- results %>%
-  filter(complete.cases(select(., ET_PT_zhang, ET_PT_szilagyi, ET_Hamon)))
+results <- results %>%
+  rename(
+    ET_Hamon_pt_zhang_cal = ET_Hamon_calibrated,
+    ET_Hamon_pt_zhang_inter = ET_Hamon_linear
+  )
 
-# Prepare data for plotting - Include Hamon calibrated, uncalibrated, and linear
-et_long <- results_complete %>%
-  select(DATE, SITECODE, ET_PT_zhang, ET_PT_szilagyi, ET_Hamon, ET_Hamon_uncalibrated, ET_Hamon_linear) %>%
+# --- Calibrate Hamon to Szilagyi ---
+daily_calibration_szilagyi <- calibrate_hamon_coefficient(
+  data = results,
+  pt_method = "ET_PT_szilagyi",
+  calibration_period = c("2013-01-01", "2019-12-31"),
+  by_day = TRUE
+)
+sites_with_daily_cal_szilagyi <- daily_calibration_szilagyi %>%
+  group_by(SITECODE) %>%
+  summarise(days_available = n()) %>%
+  filter(days_available >= 100)
+
+if (nrow(sites_with_daily_cal_szilagyi) > 0) {
+  results <- apply_hamon_calibration(
+    data = results,
+    calibration_coefs = daily_calibration_szilagyi,
+    by_day = TRUE
+  )
+} else {
+  weekly_calibration_szilagyi <- calibrate_hamon_coefficient(
+    data = results,
+    pt_method = "ET_PT_szilagyi",
+    calibration_period = c("2013-01-01", "2019-12-31"),
+    by_week = TRUE
+  )
+  sites_with_weekly_cal_szilagyi <- weekly_calibration_szilagyi %>%
+    group_by(SITECODE) %>%
+    summarise(weeks_available = n()) %>%
+    filter(weeks_available >= 26)
+  if (nrow(sites_with_weekly_cal_szilagyi) > 0) {
+    results <- apply_hamon_calibration(
+      data = results,
+      calibration_coefs = weekly_calibration_szilagyi,
+      by_day = FALSE,
+      by_week = TRUE
+    )
+  } else {
+    annual_calibration_szilagyi <- calibrate_hamon_coefficient(
+      data = results,
+      pt_method = "ET_PT_szilagyi",
+      calibration_period = c("2013-01-01", "2019-12-31"),
+      by_day = FALSE,
+      by_week = FALSE
+    )
+    results <- apply_hamon_calibration(
+      data = results,
+      calibration_coefs = annual_calibration_szilagyi,
+      by_day = FALSE,
+      by_week = FALSE
+    )
+  }
+}
+
+results$ET_Hamon_pt_szilagyi_cal <- results$ET_Hamon_calibrated
+
+# --- Create linear interpolation (Szilagyi) ---
+linear_models_szilagyi <- data.frame()
+cal_data_szilagyi <- results %>%
+  filter(DATE >= as.Date("2013-01-01") & 
+           DATE <= as.Date("2019-12-31")) %>%
+  filter(!is.na(ET_PT_szilagyi) & !is.na(ET_Hamon_uncalibrated))
+
+if (nrow(cal_data_szilagyi) > 0) {
+  linear_models_szilagyi <- cal_data_szilagyi %>%
+    group_by(SITECODE) %>%
+    summarise(
+      model_data = list(lm(ET_Hamon_uncalibrated ~ ET_PT_szilagyi, data = cur_data())),
+      slope = sapply(model_data, function(x) coef(x)[2]),
+      intercept = sapply(model_data, function(x) coef(x)[1]),
+      r_squared = sapply(model_data, function(x) summary(x)$r.squared),
+      .groups = "drop"
+    ) %>%
+    select(-model_data)
+}
+if (nrow(linear_models_szilagyi) > 0) {
+  results <- results %>%
+    left_join(linear_models_szilagyi, by = "SITECODE") %>%
+    mutate(
+      ET_Hamon_pt_szilagyi_inter = slope * ET_PT_szilagyi + intercept,
+      ET_Hamon_pt_szilagyi_inter = ifelse(!is.na(ET_PT_szilagyi), ET_Hamon_pt_szilagyi_inter, ET_Hamon_uncalibrated),
+      ET_Hamon_pt_szilagyi_inter = pmax(0, ET_Hamon_pt_szilagyi_inter, na.rm = TRUE)
+    ) %>%
+    select(-slope, -intercept, -r_squared)
+} else {
+  results$ET_Hamon_pt_szilagyi_inter <- results$ET_Hamon_uncalibrated
+}
+
+# Set default ET_Hamon to Zhang-calibrated for backward compatibility
+results$ET_Hamon <- results$ET_Hamon_pt_zhang_cal
+
+# --- Prepare long-format plotting data ---
+et_long <- results %>%
+  filter(DATE >= as.Date("1997-01-01")) %>%
+  select(DATE, SITECODE, ET_PT_zhang, ET_PT_szilagyi, 
+         ET_Hamon_uncalibrated, ET_Hamon_pt_zhang_cal, ET_Hamon_pt_zhang_inter, 
+         ET_Hamon_pt_szilagyi_cal, ET_Hamon_pt_szilagyi_inter) %>%
   pivot_longer(
-    cols = c(ET_PT_zhang, ET_PT_szilagyi, ET_Hamon, ET_Hamon_uncalibrated, ET_Hamon_linear),
+    cols = c(ET_PT_zhang, ET_PT_szilagyi, ET_Hamon_uncalibrated, 
+             ET_Hamon_pt_zhang_cal, ET_Hamon_pt_zhang_inter,
+             ET_Hamon_pt_szilagyi_cal, ET_Hamon_pt_szilagyi_inter),
     names_to = "Method",
     values_to = "ET_mm_day"
   ) %>%
   mutate(Method = factor(Method, 
-                         levels = c("ET_PT_zhang", "ET_PT_szilagyi", "ET_Hamon", "ET_Hamon_uncalibrated", "ET_Hamon_linear"),
-                         labels = c("Zhang et al. (2024)", "Szilagyi et al. (2014)", "Hamon Calibrated", "Hamon Uncalibrated", "Hamon Linear")
+                         levels = c("ET_PT_zhang", "ET_PT_szilagyi", "ET_Hamon_uncalibrated",
+                                    "ET_Hamon_pt_zhang_cal", "ET_Hamon_pt_zhang_inter",
+                                    "ET_Hamon_pt_szilagyi_cal", "ET_Hamon_pt_szilagyi_inter"),
+                         labels = c("Zhang et al. (2024)", "Szilagyi et al. (2014)", "Hamon Uncalibrated",
+                                    "Hamon-Zhang Calibrated", "Hamon-Zhang Interpolated", 
+                                    "Hamon-Szilagyi Calibrated", "Hamon-Szilagyi Interpolated")
   ))
 
-alpha_long <- results_complete %>%
+alpha_long <- results %>%
+  filter(DATE >= as.Date("1997-01-01")) %>%
   mutate(
     alpha_zhang = alpha_theoretical_weekly,
     alpha_szilagyi = alpha_szilagyi
@@ -383,34 +449,35 @@ alpha_long <- results_complete %>%
                          labels = c("Zhang et al. (2024)", "Szilagyi et al. (2014)")
   ))
 
-# PLOTTING
+# --- PLOTTING ---
 
-# Colors - Colorblind friendly palette with 5 methods
-method_colors <- c("Zhang et al. (2024)" = "#0173B2",        # Blue
-                   "Szilagyi et al. (2014)" = "#DE8F05",     # Orange  
-                   "Hamon Calibrated" = "#029E73",           # Green
-                   "Hamon Uncalibrated" = "#CC78BC",         # Pink
-                   "Hamon Linear" = "#56B4E9")               # Light Blue
+method_colors <- c("Zhang et al. (2024)" = "#0173B2", 
+                   "Szilagyi et al. (2014)" = "#DE8F05", 
+                   "Hamon Uncalibrated" = "#CC78BC", 
+                   "Hamon-Zhang Calibrated" = "#029E73", 
+                   "Hamon-Zhang Interpolated" = "#56B4E9", 
+                   "Hamon-Szilagyi Calibrated" = "#D55E00", 
+                   "Hamon-Szilagyi Interpolated" = "#F0E442")
 alpha_colors <- c("Zhang et al. (2024)" = "#0173B2", "Szilagyi et al. (2014)" = "#DE8F05")
-comparison_colors <- c("Zhang et al. (2024)" = "#0173B2", "Hamon Calibrated" = "#029E73", "Hamon Uncalibrated" = "#CC78BC")
+comparison_colors <- c("Zhang et al. (2024)" = "#0173B2", 
+                       "Hamon-Zhang Calibrated" = "#029E73", 
+                       "Hamon Uncalibrated" = "#CC78BC")
 
-# Individual site plots - Now with 5 methods
+# --- Individual site plots ---
 site_list <- unique(et_long$SITECODE)
-
 for (site in site_list) {
   p <- ggplot(filter(et_long, SITECODE == site), aes(x = DATE, y = ET_mm_day, color = Method)) +
-    geom_line(size = 0.7, alpha = 0.93) +  
+    geom_line(size = 0.6, alpha = 0.9) +  
     scale_color_manual(values = method_colors) +
     labs(title = paste0("Daily ET Comparison at ", site), x = "Date", y = "ET (mm/day)", color = "Method") +
-    theme_bw(base_size = 15) +  
+    theme_bw(base_size = 14) +  
     theme(legend.position = "bottom", strip.text = element_text(face = "bold"),
           axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.minor = element_blank()) +
     guides(color = guide_legend(ncol = 2))
-  
-  ggsave(file.path(et_plot_dir, paste0("ET_methods_comparison_", site, ".png")), p, width = 12, height = 8)
+  ggsave(file.path(et_plot_dir, paste0("ET_methods_comparison_", site, ".png")), p, width = 14, height = 9)
 }
 
-# Grid plots for each method
+# --- Grid plots for each method ---
 zhang_data <- et_long %>% filter(Method == "Zhang et al. (2024)")
 p_zhang_grid <- ggplot(zhang_data, aes(x = DATE, y = ET_mm_day)) +
   geom_line(color = method_colors["Zhang et al. (2024)"], size = 0.5, alpha = 0.8) +
@@ -423,7 +490,6 @@ p_zhang_grid <- ggplot(zhang_data, aes(x = DATE, y = ET_mm_day)) +
         panel.grid.minor = element_blank(),
         plot.title = element_text(size = 14, face = "bold"),
         plot.subtitle = element_text(size = 11))
-
 ggsave(file.path(et_plot_dir, "ET_Zhang_all_sites_grid.png"), p_zhang_grid, width = 14, height = 10)
 
 szilagyi_data <- et_long %>% filter(Method == "Szilagyi et al. (2014)")
@@ -438,16 +504,14 @@ p_szilagyi_grid <- ggplot(szilagyi_data, aes(x = DATE, y = ET_mm_day)) +
         panel.grid.minor = element_blank(),
         plot.title = element_text(size = 14, face = "bold"),
         plot.subtitle = element_text(size = 11))
-
 ggsave(file.path(et_plot_dir, "ET_Szilagyi_all_sites_grid.png"), p_szilagyi_grid, width = 14, height = 10)
 
-hamon_data <- et_long %>% filter(Method == "Hamon Calibrated")
-
+hamon_data <- et_long %>% filter(Method == "Hamon-Zhang Calibrated")
 if (nrow(hamon_data) > 0) {
   p_hamon_grid <- ggplot(hamon_data, aes(x = DATE, y = ET_mm_day)) +
-    geom_line(color = method_colors["Hamon Calibrated"], size = 0.5, alpha = 0.8) +
+    geom_line(color = method_colors["Hamon-Zhang Calibrated"], size = 0.5, alpha = 0.8) +
     facet_wrap(~ SITECODE, scales = "free_y", ncol = 3) +
-    labs(title = "Hamon Calibrated Method - All Sites (2013-2019)", 
+    labs(title = "Hamon-Zhang Calibrated Method - All Sites (2013-2019)", 
          subtitle = "Temperature-based PET (calibrated to PT-Zhang)", x = "Date", y = "ET (mm/day)") +
     theme_bw(base_size = 12) +
     theme(strip.text = element_text(face = "bold", size = 10),
@@ -455,19 +519,16 @@ if (nrow(hamon_data) > 0) {
           panel.grid.minor = element_blank(),
           plot.title = element_text(size = 14, face = "bold"),
           plot.subtitle = element_text(size = 11))
-  
   ggsave(file.path(et_plot_dir, "ET_Hamon_all_sites_grid_2013_2019.png"), p_hamon_grid, width = 14, height = 10)
 }
 
-# Full time series Hamon plot
 hamon_full_data <- results %>%
-  filter(DATE >= as.Date("1997-01-01") & !is.na(ET_Hamon)) %>%
-  select(DATE, SITECODE, ET_Hamon)
-
-p_hamon_full_grid <- ggplot(hamon_full_data, aes(x = DATE, y = ET_Hamon)) +
-  geom_line(color = method_colors["Hamon Calibrated"], size = 0.4, alpha = 0.8) +
+  filter(DATE >= as.Date("1997-01-01") & !is.na(ET_Hamon_pt_zhang_cal)) %>%
+  select(DATE, SITECODE, ET_Hamon_pt_zhang_cal)
+p_hamon_full_grid <- ggplot(hamon_full_data, aes(x = DATE, y = ET_Hamon_pt_zhang_cal)) +
+  geom_line(color = method_colors["Hamon-Zhang Calibrated"], size = 0.4, alpha = 0.8) +
   facet_wrap(~ SITECODE, scales = "free_y", ncol = 3) +
-  labs(title = "Hamon Calibrated Method - All Sites (Full Time Series)",
+  labs(title = "Hamon-Zhang Calibrated Method - All Sites (Full Time Series)",
        subtitle = "Temperature-based PET (1997-present, calibrated to PT-Zhang 2013-2019)",
        x = "Date", y = "ET (mm/day)") +
   theme_bw(base_size = 12) +
@@ -476,67 +537,119 @@ p_hamon_full_grid <- ggplot(hamon_full_data, aes(x = DATE, y = ET_Hamon)) +
         panel.grid.minor = element_blank(),
         plot.title = element_text(size = 14, face = "bold"),
         plot.subtitle = element_text(size = 11))
-
 ggsave(file.path(et_plot_dir, "ET_Hamon_all_sites_grid_full_timeseries.png"), p_hamon_full_grid, width = 16, height = 12)
 
-# COMPARISON PLOTS: Zhang vs Hamon Calibrated vs Hamon Uncalibrated
-
-# Overlap period comparison (2013-2019)
-comparison_overlap_data <- results_complete %>%
-  select(DATE, SITECODE, ET_PT_zhang, ET_Hamon, ET_Hamon_uncalibrated) %>%
-  pivot_longer(cols = c(ET_PT_zhang, ET_Hamon, ET_Hamon_uncalibrated),
-               names_to = "Method", values_to = "ET_mm_day") %>%
+# --- Comprehensive Hamon methods comparison plot ---
+hamon_methods_data <- results %>%
+  filter(DATE >= as.Date("2013-01-01") & DATE <= as.Date("2019-12-31")) %>%
+  select(DATE, SITECODE, ET_Hamon_uncalibrated, ET_Hamon_pt_zhang_cal, ET_Hamon_pt_zhang_inter,
+         ET_Hamon_pt_szilagyi_cal, ET_Hamon_pt_szilagyi_inter) %>%
+  pivot_longer(
+    cols = c(ET_Hamon_uncalibrated, ET_Hamon_pt_zhang_cal, ET_Hamon_pt_zhang_inter,
+             ET_Hamon_pt_szilagyi_cal, ET_Hamon_pt_szilagyi_inter),
+    names_to = "Method",
+    values_to = "ET_mm_day"
+  ) %>%
   filter(!is.na(ET_mm_day)) %>%
   mutate(Method = factor(Method,
-                         levels = c("ET_PT_zhang", "ET_Hamon", "ET_Hamon_uncalibrated"),
-                         labels = c("Zhang et al. (2024)", "Hamon Calibrated", "Hamon Uncalibrated")))
+                         levels = c("ET_Hamon_uncalibrated", "ET_Hamon_pt_zhang_cal", "ET_Hamon_pt_zhang_inter",
+                                    "ET_Hamon_pt_szilagyi_cal", "ET_Hamon_pt_szilagyi_inter"),
+                         labels = c("Hamon Uncalibrated", "Hamon-Zhang Calibrated", "Hamon-Zhang Interpolated",
+                                    "Hamon-Szilagyi Calibrated", "Hamon-Szilagyi Interpolated")))
 
+p_hamon_methods_comparison <- ggplot(hamon_methods_data, aes(x = DATE, y = ET_mm_day, color = Method)) +
+  geom_line(size = 0.4, alpha = 0.8) +
+  facet_wrap(~ SITECODE, scales = "free_y", ncol = 3) +
+  scale_color_manual(values = method_colors[c("Hamon Uncalibrated", "Hamon-Zhang Calibrated", "Hamon-Zhang Interpolated",
+                                              "Hamon-Szilagyi Calibrated", "Hamon-Szilagyi Interpolated")]) +
+  labs(title = "All Hamon Methods Comparison - All Sites (2013-2019)",
+       subtitle = "Comparison of uncalibrated, calibrated, and interpolated Hamon methods",
+       x = "Date", y = "ET (mm/day)", color = "Method") +
+  theme_bw(base_size = 12) +
+  theme(strip.text = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(size = 14, face = "bold"),
+        plot.subtitle = element_text(size = 11),
+        legend.position = "bottom") +
+  guides(color = guide_legend(ncol = 2))
+ggsave(file.path(et_plot_dir, "ET_all_Hamon_methods_comparison_all_sites.png"), p_hamon_methods_comparison, width = 18, height = 16)
+
+# --- COMPARISON PLOTS: Zhang vs Hamon Calibrated vs Hamon Uncalibrated ---
+comparison_overlap_data <- results %>%
+  filter(DATE >= as.Date("2013-01-01") & DATE <= as.Date("2019-12-31")) %>%
+  select(DATE, SITECODE, ET_PT_zhang, ET_Hamon_pt_zhang_cal, ET_Hamon_uncalibrated) %>%
+  pivot_longer(
+    cols = c(ET_PT_zhang, ET_Hamon_pt_zhang_cal, ET_Hamon_uncalibrated),
+    names_to = "Method", values_to = "ET_mm_day"
+  ) %>%
+  filter(!is.na(ET_mm_day)) %>%
+  mutate(Method = factor(
+    Method,
+    levels = c("ET_PT_zhang", "ET_Hamon_pt_zhang_cal", "ET_Hamon_uncalibrated"),
+    labels = c("Zhang et al. (2024)", "Hamon-Zhang Calibrated", "Hamon Uncalibrated")
+  ))
 p_comparison_overlap <- ggplot(comparison_overlap_data, aes(x = DATE, y = ET_mm_day, color = Method)) +
   geom_line(size = 0.4, alpha = 0.8) +
   facet_wrap(~ SITECODE, scales = "free_y", ncol = 3) +
   scale_color_manual(values = comparison_colors) +
-  labs(title = "ET Method Comparison - All Sites (2013-2019)",
-       subtitle = "Zhang vs Hamon Calibrated vs Hamon Uncalibrated (overlap period)",
-       x = "Date", y = "ET (mm/day)", color = "Method") +
+  labs(
+    title = "ET Method Comparison - All Sites (2013-2019)",
+    subtitle = "Zhang vs Hamon-Zhang Calibrated vs Hamon Uncalibrated (overlap period)",
+    x = "Date", y = "ET (mm/day)", color = "Method"
+  ) +
   theme_bw(base_size = 12) +
-  theme(strip.text = element_text(face = "bold", size = 10),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
-        panel.grid.minor = element_blank(),
-        plot.title = element_text(size = 14, face = "bold"),
-        plot.subtitle = element_text(size = 11),
-        legend.position = "bottom")
-
-ggsave(file.path(et_plot_dir, "ET_comparison_Zhang_Hamon_all_sites_2013_2019.png"), p_comparison_overlap, width = 16, height = 14)
+  theme(
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11),
+    legend.position = "bottom"
+  )
+ggsave(
+  file.path(et_plot_dir, "ET_comparison_Zhang_Hamon_all_sites_2013_2019.png"),
+  p_comparison_overlap, width = 16, height = 14
+)
 
 # Full time series comparison (1997-present)
 comparison_full_data <- results %>%
   filter(DATE >= as.Date("1997-01-01")) %>%
-  select(DATE, SITECODE, ET_PT_zhang, ET_Hamon, ET_Hamon_uncalibrated) %>%
-  pivot_longer(cols = c(ET_PT_zhang, ET_Hamon, ET_Hamon_uncalibrated),
-               names_to = "Method", values_to = "ET_mm_day") %>%
+  select(DATE, SITECODE, ET_PT_zhang, ET_Hamon_pt_zhang_cal, ET_Hamon_uncalibrated) %>%
+  pivot_longer(
+    cols = c("ET_PT_zhang", "ET_Hamon_pt_zhang_cal", "ET_Hamon_uncalibrated"),
+    names_to = "Method", values_to = "ET_mm_day"
+  ) %>%
   filter(!is.na(ET_mm_day)) %>%
-  mutate(Method = factor(Method,
-                         levels = c("ET_PT_zhang", "ET_Hamon", "ET_Hamon_uncalibrated"),
-                         labels = c("Zhang et al. (2024)", "Hamon Calibrated", "Hamon Uncalibrated")))
-
+  mutate(Method = factor(
+    Method,
+    levels = c("ET_PT_zhang", "ET_Hamon_pt_zhang_cal", "ET_Hamon_uncalibrated"),
+    labels = c("Zhang et al. (2024)", "Hamon-Zhang Calibrated", "Hamon Uncalibrated")
+  ))
 p_comparison_full <- ggplot(comparison_full_data, aes(x = DATE, y = ET_mm_day, color = Method)) +
   geom_line(size = 0.3, alpha = 0.8) +
   facet_wrap(~ SITECODE, scales = "free_y", ncol = 3) +
   scale_color_manual(values = comparison_colors) +
-  labs(title = "ET Method Comparison - All Sites (Full Time Series)",
-       subtitle = "Zhang vs Hamon Calibrated vs Hamon Uncalibrated (1997-present, where data available)",
-       x = "Date", y = "ET (mm/day)", color = "Method") +
+  labs(
+    title = "ET Method Comparison - All Sites (Full Time Series)",
+    subtitle = "Zhang vs Hamon-Zhang Calibrated vs Hamon Uncalibrated (1997-present, where data available)",
+    x = "Date", y = "ET (mm/day)", color = "Method"
+  ) +
   theme_bw(base_size = 12) +
-  theme(strip.text = element_text(face = "bold", size = 10),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
-        panel.grid.minor = element_blank(),
-        plot.title = element_text(size = 14, face = "bold"),
-        plot.subtitle = element_text(size = 11),
-        legend.position = "bottom")
+  theme(
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11),
+    legend.position = "bottom"
+  )
+ggsave(
+  file.path(et_plot_dir, "ET_comparison_Zhang_Hamon_all_sites_full_timeseries.png"),
+  p_comparison_full, width = 18, height = 14
+)
 
-ggsave(file.path(et_plot_dir, "ET_comparison_Zhang_Hamon_all_sites_full_timeseries.png"), p_comparison_full, width = 18, height = 14)
-
-# Alpha plots
+# --- Alpha plots ---
 for (site in unique(alpha_long$SITECODE)) {
   p <- ggplot(filter(alpha_long, SITECODE == site), aes(x = DATE, y = Alpha, color = Method)) +
     geom_line(size = 0.8, alpha = 0.98) +
@@ -544,7 +657,6 @@ for (site in unique(alpha_long$SITECODE)) {
     theme_bw(base_size = 15) +
     theme(legend.position = "bottom", strip.text = element_text(face = "bold"),
           axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.minor = element_blank())
-  
   ggsave(file.path(alpha_plot_dir, paste0("Alpha_time_series_", site, ".png")), p, width = 10, height = 5)
 }
 
@@ -561,7 +673,6 @@ p_zhang_alpha_grid <- ggplot(zhang_alpha_data, aes(x = DATE, y = Alpha)) +
         panel.grid.minor = element_blank(),
         plot.title = element_text(size = 14, face = "bold"),
         plot.subtitle = element_text(size = 11))
-
 ggsave(file.path(alpha_plot_dir, "Alpha_Zhang_all_sites_grid.png"), p_zhang_alpha_grid, width = 14, height = 10)
 
 szilagyi_alpha_data <- alpha_long %>% filter(Method == "Szilagyi et al. (2014)")
@@ -576,10 +687,9 @@ p_szilagyi_alpha_grid <- ggplot(szilagyi_alpha_data, aes(x = DATE, y = Alpha)) +
         panel.grid.minor = element_blank(),
         plot.title = element_text(size = 14, face = "bold"),
         plot.subtitle = element_text(size = 11))
-
 ggsave(file.path(alpha_plot_dir, "Alpha_Szilagyi_all_sites_grid.png"), p_szilagyi_alpha_grid, width = 14, height = 10)
 
-# EXPORT SINGLE WATER BALANCE CSV
+# --- EXPORT SINGLE WATER BALANCE CSV ---
 water_balance_all_methods <- results %>%
   filter(DATE >= as.Date("1997-01-01")) %>%
   transmute(
@@ -587,11 +697,12 @@ water_balance_all_methods <- results %>%
     SITECODE,
     P_mm_day = P_mm_d,
     Q_mm_day = Q_mm_d,
-    ET_hamon_calibrated = ET_Hamon,
     ET_hamon_uncalibrated = ET_Hamon_uncalibrated,
-    ET_hamon_linear = ET_Hamon_linear,
+    ET_hamon_pt_zhang_cal = ET_Hamon_pt_zhang_cal,
+    ET_hamon_pt_zhang_inter = ET_Hamon_pt_zhang_inter,
+    ET_hamon_pt_szilagyi_cal = ET_Hamon_pt_szilagyi_cal,
+    ET_hamon_pt_szilagyi_inter = ET_Hamon_pt_szilagyi_inter,
     ET_pt_zhang = ET_PT_zhang,
     ET_pt_szilagyi = ET_PT_szilagyi
   )
-
 write_csv(water_balance_all_methods, file.path(output_dir, "daily_water_balance_all_ET_methods_1997_present.csv"))
