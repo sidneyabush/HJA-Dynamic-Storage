@@ -19,7 +19,9 @@ method_colors <- c(
   "PT-Szilagyi (2014)"                 = "#DE8F05",
   "Hamon Uncalibrated"                 = "#C3D7A4",
   "Hamon (Monthly Calibrated, Zhang)"  = "#029E73",
-  "Hamon (Monthly Calibrated, Szilagyi)" = "#D55E00"
+  "Hamon (Monthly Calibrated, Szilagyi)" = "#D55E00",
+  "Hamon (Interpolated, Zhang)"        = "#56B4E9",
+  "Hamon (Interpolated, Szilagyi)"     = "#CC79A7"
 )
 
 method_label_to_col <- c(
@@ -27,14 +29,21 @@ method_label_to_col <- c(
   "PT-Szilagyi (2014)"                 = "ET_PT_szilagyi",
   "Hamon Uncalibrated"                 = "ET_Hamon_uncalibrated",
   "Hamon (Monthly Calibrated, Zhang)"  = "ET_Hamon_pt_zhang_monthly",
-  "Hamon (Monthly Calibrated, Szilagyi)" = "ET_Hamon_pt_szilagyi_monthly"
+  "Hamon (Monthly Calibrated, Szilagyi)" = "ET_Hamon_pt_szilagyi_monthly",
+  # <- updated to your actual column names:
+  "Hamon (Interpolated, Zhang)"        = "ET_Hamon_pt_zhang_interp_full",
+  "Hamon (Interpolated, Szilagyi)"     = "ET_Hamon_pt_szilagyi_interp_full"
 )
 
 # --- 1. LOAD & EXPORT MERGED ---------------------------------------
-df <- read_csv(file.path(input_dir, "Hamon_ET_methods_timeseries_monthly_calibrated.csv"),
-               show_col_types = FALSE)
+df <- read_csv(
+  file.path(input_dir, "daily_water_balance_all_ET_methods_1997_present.csv"),
+  show_col_types = FALSE
+)
 
-write_csv(df, file.path(input_dir, "daily_water_balance_all_ET_methods_1997_present.csv"))
+# sanity‐check
+stopifnot(all(c("ET_Hamon_pt_zhang_interp_full",
+                "ET_Hamon_pt_szilagyi_interp_full") %in% names(df)))
 
 site_list <- unique(df$SITECODE)
 
@@ -42,59 +51,80 @@ site_list <- unique(df$SITECODE)
 for(site in site_list){
   d <- df %>%
     filter(SITECODE == site,
-           DATE >= as.Date("2013-01-01"),
-           DATE <= as.Date("2019-12-31"))
+           between(DATE, as.Date("2013-01-01"), as.Date("2019-12-31")))
   
   p_z <- ggplot(d, aes(x = ET_PT_zhang)) +
-    geom_point(aes(y = ET_Hamon_uncalibrated, color = "Hamon Uncalibrated"), size=1.2, alpha=0.7) +
-    geom_point(aes(y = ET_Hamon_pt_zhang_monthly, color = "Hamon Calibrated"), size=1.2, alpha=0.7) +
+    geom_point(aes(y = ET_Hamon_uncalibrated,        color = "Hamon Uncalibrated"), size=1.2, alpha=0.7) +
+    geom_point(aes(y = ET_Hamon_pt_zhang_monthly,    color = "Hamon (Monthly Calibrated, Zhang)"), size=1.2, alpha=0.7) +
+    geom_point(aes(y = ET_Hamon_pt_zhang_interp_full, color = "Hamon (Interpolated, Zhang)"),    size=1.2, alpha=0.7) +
     geom_abline(slope=1, intercept=0, linetype="dashed") +
-    scale_color_manual(values = c("Hamon Uncalibrated"="#C3D7A4", "Hamon Calibrated"="#029E73")) +
-    labs(title = paste(site, "- Zhang"), x="PT-Zhang ET", y="Hamon ET", color="") +
+    scale_color_manual(values = method_colors[c(
+      "Hamon Uncalibrated",
+      "Hamon (Monthly Calibrated, Zhang)",
+      "Hamon (Interpolated, Zhang)"
+    )]) +
+    labs(title = paste(site, "- Zhang"),
+         x = "PT-Zhang ET (mm/day)",
+         y = "Hamon ET (mm/day)",
+         color = NULL) +
     theme_bw() +
-    theme(legend.position=c(0.02,0.98), legend.justification=c("left","top"),
-          panel.grid=element_blank())
+    theme(legend.position      = c(0.02,0.98),
+          legend.justification = c("left","top"),
+          panel.grid          = element_blank())
   
   p_s <- ggplot(d, aes(x = ET_PT_szilagyi)) +
-    geom_point(aes(y = ET_Hamon_uncalibrated, color = "Hamon Uncalibrated"), size=1.2, alpha=0.7) +
-    geom_point(aes(y = ET_Hamon_pt_szilagyi_monthly, color = "Hamon Calibrated"), size=1.2, alpha=0.7) +
+    geom_point(aes(y = ET_Hamon_uncalibrated,         color = "Hamon Uncalibrated"), size=1.2, alpha=0.7) +
+    geom_point(aes(y = ET_Hamon_pt_szilagyi_monthly,  color = "Hamon (Monthly Calibrated, Szilagyi)"), size=1.2, alpha=0.7) +
+    geom_point(aes(y = ET_Hamon_pt_szilagyi_interp_full, color = "Hamon (Interpolated, Szilagyi)"),  size=1.2, alpha=0.7) +
     geom_abline(slope=1, intercept=0, linetype="dashed") +
-    scale_color_manual(values = c("Hamon Uncalibrated"="#C3D7A4", "Hamon Calibrated"="#D55E00")) +
-    labs(title = paste(site, "- Szilagyi"), x="PT-Szilagyi ET", y=NULL, color="") +
+    scale_color_manual(values = method_colors[c(
+      "Hamon Uncalibrated",
+      "Hamon (Monthly Calibrated, Szilagyi)",
+      "Hamon (Interpolated, Szilagyi)"
+    )]) +
+    labs(title = paste(site, "- Szilagyi"),
+         x = "PT-Szilagyi ET (mm/day)",
+         y = NULL,
+         color = NULL) +
     theme_bw() +
-    theme(legend.position=c(0.02,0.98), legend.justification=c("left","top"),
-          panel.grid=element_blank())
+    theme(legend.position      = c(0.02,0.98),
+          legend.justification = c("left","top"),
+          panel.grid          = element_blank())
   
-  combined <- p_z + p_s + plot_layout(ncol=2, guides="collect")
-  ggsave(file.path(scatter_dir, paste0("scatter_calibration_",site,".png")),
-         combined, width=14, height=7)
+  ggsave(file.path(scatter_dir, paste0("scatter_calibration_", site, ".png")),
+         p_z + p_s + plot_layout(ncol=2, guides="collect"),
+         width=14, height=7)
+}
+
+# helper to pivot any subset of methods
+pivot_methods <- function(df, methods){
+  df %>%
+    select(DATE, SITECODE, all_of(methods)) %>%
+    pivot_longer(-c(DATE,SITECODE), names_to="Method", values_to="ET_mm_day")
 }
 
 # --- 3a. PER-SITE FULL-RECORD TIME SERIES --------------------------
 for(site in site_list){
-  ts_long <- df %>%
-    filter(SITECODE==site) %>%
-    select(DATE, !!!method_label_to_col) %>%
-    pivot_longer(-DATE, names_to="Method", values_to="ET_mm_day")
+  ts_long <- pivot_methods(df, method_label_to_col) %>%
+    filter(SITECODE == site)
   
   p_ts <- ggplot(ts_long, aes(DATE, ET_mm_day, color=Method)) +
     geom_line(size=0.6, alpha=0.8) +
     scale_color_manual(values=method_colors) +
-    labs(title=paste("Daily ET at",site), x="Date", y="ET (mm/day)", color="Method") +
+    labs(title=paste("Daily ET at", site),
+         x="Date", y="ET (mm/day)", color="Method") +
     theme_bw(base_size=13) +
     theme(legend.position="bottom",
           axis.text.x=element_text(angle=45,hjust=1),
           panel.grid.minor=element_blank())
   
-  ggsave(file.path(plot_dir, paste0("full_record_",site,".png")),
+  ggsave(file.path(plot_dir, paste0("full_record_", site, ".png")),
          p_ts, width=12, height=6)
 }
 
 # --- 3b. GRID OF ALL SITES, FULL RECORD ---------------------------
-all_long <- df %>%
-  filter(DATE>=as.Date("1997-01-01")) %>%
-  select(DATE, SITECODE, !!!method_label_to_col) %>%
-  pivot_longer(-c(DATE,SITECODE), names_to="Method", values_to="ET_mm_day")
+all_long <- pivot_methods(df, method_label_to_col) %>%
+  filter(DATE >= as.Date("1997-01-01"))
 
 p_grid_full <- ggplot(all_long, aes(DATE, ET_mm_day, color=Method)) +
   geom_line(size=0.4, alpha=0.7) +
@@ -103,19 +133,18 @@ p_grid_full <- ggplot(all_long, aes(DATE, ET_mm_day, color=Method)) +
   labs(title="ET Methods Across All Sites (1997–Present)",
        x="Date", y="ET (mm/day)", color="Method") +
   theme_bw(base_size=12) +
-  theme(strip.text=element_text(face="bold", size=9),
-        axis.text.x=element_text(angle=45,hjust=1,size=7),
-        legend.position="bottom",
-        panel.grid.minor=element_blank())
+  theme(strip.text       = element_text(face="bold", size=9),
+        axis.text.x      = element_text(angle=45,hjust=1,size=7),
+        legend.position  = "bottom",
+        panel.grid.minor = element_blank())
 
-ggsave(file.path(plot_dir,"grid_all_sites_full_record.png"),
+ggsave(file.path(plot_dir, "grid_all_sites_full_record.png"),
        p_grid_full, width=16, height=10)
 
 # --- 3c. GRID BY METHOD, FULL RECORD ------------------------------
 for(label in names(method_label_to_col)){
   col <- method_label_to_col[[label]]
   d_m <- df %>%
-    # create a common name ET_mm_day
     transmute(DATE, SITECODE, ET_mm_day = .data[[col]]) %>%
     filter(!is.na(ET_mm_day))
   
@@ -124,40 +153,38 @@ for(label in names(method_label_to_col)){
     facet_wrap(~SITECODE, scales="free_y", ncol=3) +
     labs(title=label, x="Date", y="ET (mm/day)") +
     theme_bw(base_size=12) +
-    theme(strip.text=element_text(face="bold",size=9),
-          axis.text.x=element_text(angle=45,hjust=1,size=7),
-          panel.grid.minor=element_blank())
+    theme(strip.text       = element_text(face="bold", size=9),
+          axis.text.x      = element_text(angle=45,hjust=1,size=7),
+          panel.grid.minor = element_blank())
   
   fname <- gsub("[^A-Za-z0-9]+","_", label)
-  ggsave(file.path(plot_dir, paste0("grid_by_method_",fname,".png")),
+  ggsave(file.path(plot_dir, paste0("grid_by_method_", fname, ".png")),
          p_m, width=14, height=10)
 }
 
 # --- 4a. PER-SITE CALIBRATION-WINDOW (2013–2019) -------------------
 for(site in site_list){
-  cal_long <- df %>%
-    filter(SITECODE==site,
-           DATE>=as.Date("2013-01-01"), DATE<=as.Date("2019-12-31")) %>%
-    select(DATE, !!!method_label_to_col) %>%
-    pivot_longer(-DATE, names_to="Method", values_to="ET_mm_day")
+  cal_long <- pivot_methods(df, method_label_to_col) %>%
+    filter(SITECODE == site,
+           between(DATE, as.Date("2013-01-01"), as.Date("2019-12-31")))
   
   p_cal_ts <- ggplot(cal_long, aes(DATE, ET_mm_day, color=Method)) +
     geom_line(size=0.6, alpha=0.8) +
     scale_color_manual(values=method_colors) +
-    labs(title=paste("Calibration Window at",site),
+    labs(title=paste("Calibration Window at", site),
          x="Date", y="ET (mm/day)", color="Method") +
     theme_bw(base_size=13) +
     theme(legend.position="bottom",
           axis.text.x=element_text(angle=45,hjust=1),
           panel.grid.minor=element_blank())
   
-  ggsave(file.path(plot_dir, paste0("cal_window_",site,".png")),
+  ggsave(file.path(plot_dir, paste0("cal_window_", site, ".png")),
          p_cal_ts, width=12, height=6)
 }
 
 # --- 4b. GRID ALL SITES, CALIBRATION WINDOW -----------------------
 cal_grid <- all_long %>%
-  filter(DATE>=as.Date("2013-01-01"), DATE<=as.Date("2019-12-31"))
+  filter(between(DATE, as.Date("2013-01-01"), as.Date("2019-12-31")))
 
 p_grid_cal <- ggplot(cal_grid, aes(DATE, ET_mm_day, color=Method)) +
   geom_line(size=0.4, alpha=0.7) +
@@ -166,10 +193,10 @@ p_grid_cal <- ggplot(cal_grid, aes(DATE, ET_mm_day, color=Method)) +
   labs(title="ET Methods Across All Sites (2013–2019)",
        x="Date", y="ET (mm/day)", color="Method") +
   theme_bw(base_size=12) +
-  theme(strip.text=element_text(face="bold", size=9),
-        axis.text.x=element_text(angle=45,hjust=1,size=7),
-        legend.position="bottom",
-        panel.grid.minor=element_blank())
+  theme(strip.text       = element_text(face="bold", size=9),
+        axis.text.x      = element_text(angle=45,hjust=1,size=7),
+        legend.position  = "bottom",
+        panel.grid.minor = element_blank())
 
-ggsave(file.path(plot_dir,"grid_all_sites_2013_2019.png"),
+ggsave(file.path(plot_dir, "grid_all_sites_2013_2019.png"),
        p_grid_cal, width=16, height=10)
