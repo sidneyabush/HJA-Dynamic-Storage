@@ -1181,12 +1181,11 @@ add_discharge_to_watersheds <- function(watershed_datasets, discharge) {
     left_join(da_df, by = "SITECODE") %>%
     filter(!is.na(DA_M2)) %>%
     mutate(
-      Date = as.Date(DATE, "%m/%d/%Y"),
-      Q = MEAN_Q * 0.02831683199881,  
-      Q_mm_d = (Q * 86400) / (DA_M2) * 1000  
+      DATE   = as.Date(DATE, "%m/%d/%Y"),
+      Q_m3s  = MEAN_Q * 0.0283168,             
+      Q_mm_d = Q_m3s * 86400 / DA_M2 * 1000    
     ) %>%
-    select(Date, SITECODE, Q_mm_d) %>%
-    rename(DATE = Date)
+    select(DATE, SITECODE, Q_mm_d)
   
   # Add discharge data to each watershed dataset
   for (site_name in names(watershed_datasets)) {
@@ -1365,11 +1364,12 @@ gslook_q <- discharge %>%
   filter(SITECODE == "GSLOOK") %>%
   left_join(da_df, by = "SITECODE") %>%
   mutate(
-    DATE = as.Date(DATE, "%m/%d/%Y"),
-    Q = MEAN_Q * 0.02831683199881,  # cfs to m³/s
-    Q_mm_d = (Q * 86400) / (DA_M2 * 1000000) * 1000
+    DATE   = as.Date(DATE, "%m/%d/%Y"),
+    Q_m3s  = MEAN_Q * 0.0283168,              
+    Q_mm_d = Q_m3s * 86400 / DA_M2 * 1000    
   ) %>%
   select(DATE, Q_mm_d)
+
 
 
 # Add Q_mm_d to GSLOOK_FULL

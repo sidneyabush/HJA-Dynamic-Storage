@@ -15,92 +15,101 @@ dir.create(plot_dir,    showWarnings = FALSE, recursive = TRUE)
 dir.create(scatter_dir, showWarnings = FALSE, recursive = TRUE)
 
 method_colors <- c(
-  "PT-Zhang (2024)"                    = "#0173B2",
-  "PT-Szilagyi (2014)"                 = "#DE8F05",
-  "Hamon Uncalibrated"                 = "#C3D7A4",
-  "Hamon (Monthly Calibrated, Zhang)"  = "#029E73",
+  "PT-Zhang (2024)"                      = "#0173B2",
+  "PT-Szilagyi (2014)"                   = "#DE8F05",
+  "Hamon Uncalibrated"                   = "#C3D7A4",
+  "Hamon (Monthly Calibrated, Zhang)"    = "#029E73",
   "Hamon (Monthly Calibrated, Szilagyi)" = "#D55E00",
-  "Hamon (Interpolated, Zhang)"        = "#56B4E9",
-  "Hamon (Interpolated, Szilagyi)"     = "#CC79A7"
+  "Hamon (Interpolated, Zhang)"          = "#56B4E9",
+  "Hamon (Interpolated, Szilagyi)"       = "#CC79A7"
 )
 
 method_label_to_col <- c(
-  "PT-Zhang (2024)"                    = "ET_PT_zhang",
-  "PT-Szilagyi (2014)"                 = "ET_PT_szilagyi",
-  "Hamon Uncalibrated"                 = "ET_Hamon_uncalibrated",
-  "Hamon (Monthly Calibrated, Zhang)"  = "ET_Hamon_pt_zhang_monthly",
+  "PT-Zhang (2024)"                      = "ET_PT_zhang",
+  "PT-Szilagyi (2014)"                   = "ET_PT_szilagyi",
+  "Hamon Uncalibrated"                   = "ET_Hamon_uncalibrated",
+  "Hamon (Monthly Calibrated, Zhang)"    = "ET_Hamon_pt_zhang_monthly",
   "Hamon (Monthly Calibrated, Szilagyi)" = "ET_Hamon_pt_szilagyi_monthly",
-  # <- updated to your actual column names:
-  "Hamon (Interpolated, Zhang)"        = "ET_Hamon_pt_zhang_interp_full",
-  "Hamon (Interpolated, Szilagyi)"     = "ET_Hamon_pt_szilagyi_interp_full"
+  "Hamon (Interpolated, Zhang)"          = "ET_Hamon_pt_zhang_interp_full",
+  "Hamon (Interpolated, Szilagyi)"       = "ET_Hamon_pt_szilagyi_interp_full"
 )
 
-# --- 1. LOAD & EXPORT MERGED ---------------------------------------
+# --- 1. LOAD MERGED & EXPORT FOR SHARING ---------------------------
 df <- read_csv(
   file.path(input_dir, "daily_water_balance_all_ET_methods_1997_present.csv"),
   show_col_types = FALSE
 )
+write_csv(df,
+          file.path(input_dir, "daily_water_balance_all_ET_methods_1997_present.csv"))
 
-# sanity‐check
-stopifnot(all(c("ET_Hamon_pt_zhang_interp_full",
-                "ET_Hamon_pt_szilagyi_interp_full") %in% names(df)))
-
+stopifnot(all(method_label_to_col %in% names(df)))
 site_list <- unique(df$SITECODE)
-
-# --- 2. SCATTERPLOTS (2013–2019 calibration window) ----------------
-for(site in site_list){
-  d <- df %>%
-    filter(SITECODE == site,
-           between(DATE, as.Date("2013-01-01"), as.Date("2019-12-31")))
-  
-  p_z <- ggplot(d, aes(x = ET_PT_zhang)) +
-    geom_point(aes(y = ET_Hamon_uncalibrated,        color = "Hamon Uncalibrated"), size=1.2, alpha=0.7) +
-    geom_point(aes(y = ET_Hamon_pt_zhang_monthly,    color = "Hamon (Monthly Calibrated, Zhang)"), size=1.2, alpha=0.7) +
-    geom_point(aes(y = ET_Hamon_pt_zhang_interp_full, color = "Hamon (Interpolated, Zhang)"),    size=1.2, alpha=0.7) +
-    geom_abline(slope=1, intercept=0, linetype="dashed") +
-    scale_color_manual(values = method_colors[c(
-      "Hamon Uncalibrated",
-      "Hamon (Monthly Calibrated, Zhang)",
-      "Hamon (Interpolated, Zhang)"
-    )]) +
-    labs(title = paste(site, "- Zhang"),
-         x = "PT-Zhang ET (mm/day)",
-         y = "Hamon ET (mm/day)",
-         color = NULL) +
-    theme_bw() +
-    theme(legend.position      = c(0.02,0.98),
-          legend.justification = c("left","top"),
-          panel.grid          = element_blank())
-  
-  p_s <- ggplot(d, aes(x = ET_PT_szilagyi)) +
-    geom_point(aes(y = ET_Hamon_uncalibrated,         color = "Hamon Uncalibrated"), size=1.2, alpha=0.7) +
-    geom_point(aes(y = ET_Hamon_pt_szilagyi_monthly,  color = "Hamon (Monthly Calibrated, Szilagyi)"), size=1.2, alpha=0.7) +
-    geom_point(aes(y = ET_Hamon_pt_szilagyi_interp_full, color = "Hamon (Interpolated, Szilagyi)"),  size=1.2, alpha=0.7) +
-    geom_abline(slope=1, intercept=0, linetype="dashed") +
-    scale_color_manual(values = method_colors[c(
-      "Hamon Uncalibrated",
-      "Hamon (Monthly Calibrated, Szilagyi)",
-      "Hamon (Interpolated, Szilagyi)"
-    )]) +
-    labs(title = paste(site, "- Szilagyi"),
-         x = "PT-Szilagyi ET (mm/day)",
-         y = NULL,
-         color = NULL) +
-    theme_bw() +
-    theme(legend.position      = c(0.02,0.98),
-          legend.justification = c("left","top"),
-          panel.grid          = element_blank())
-  
-  ggsave(file.path(scatter_dir, paste0("scatter_calibration_", site, ".png")),
-         p_z + p_s + plot_layout(ncol=2, guides="collect"),
-         width=14, height=7)
-}
 
 # helper to pivot any subset of methods
 pivot_methods <- function(df, methods){
   df %>%
     select(DATE, SITECODE, all_of(methods)) %>%
-    pivot_longer(-c(DATE,SITECODE), names_to="Method", values_to="ET_mm_day")
+    pivot_longer(-c(DATE, SITECODE), names_to="Method", values_to="ET_mm_day")
+}
+
+# --- 2. SCATTERPLOTS (2013–2019 calibration window, 4 panels) ------
+for(site in site_list){
+  d <- df %>%
+    filter(SITECODE == site,
+           between(DATE, as.Date("2013-01-01"), as.Date("2019-12-31")))
+  
+  # Panel 1: Monthly‐Calibrated Zhang
+  p1 <- ggplot(d, aes(x = ET_PT_zhang)) +
+    geom_point(aes(y = ET_Hamon_pt_zhang_monthly,
+                   color = "Hamon (Monthly Calibrated, Zhang)"),
+               size=1.2, alpha=0.7) +
+    geom_abline(slope=1, intercept=0, linetype="dashed") +
+    scale_color_manual(values = method_colors["Hamon (Monthly Calibrated, Zhang)"]) +
+    labs(title=paste(site, "- Zhang (monthly)"),
+         x="PT–Zhang ET (mm/day)", y="Hamon ET (mm/day)") +
+    theme_bw() + theme(panel.grid=element_blank(), legend.position="none")
+  
+  # Panel 2: Interpolated Zhang
+  p2 <- ggplot(d, aes(x = ET_PT_zhang)) +
+    geom_point(aes(y = ET_Hamon_pt_zhang_interp_full,
+                   color = "Hamon (Interpolated, Zhang)"),
+               size=1.2, alpha=0.7) +
+    geom_abline(slope=1, intercept=0, linetype="dashed") +
+    scale_color_manual(values = method_colors["Hamon (Interpolated, Zhang)"]) +
+    labs(title=paste(site, "- Zhang (interpolated)"),
+         x="PT–Zhang ET (mm/day)", y=NULL) +
+    theme_bw() + theme(panel.grid=element_blank(), legend.position="none")
+  
+  # Panel 3: Monthly‐Calibrated Szilagyi
+  p3 <- ggplot(d, aes(x = ET_PT_szilagyi)) +
+    geom_point(aes(y = ET_Hamon_pt_szilagyi_monthly,
+                   color = "Hamon (Monthly Calibrated, Szilagyi)"),
+               size=1.2, alpha=0.7) +
+    geom_abline(slope=1, intercept=0, linetype="dashed") +
+    scale_color_manual(values = method_colors["Hamon (Monthly Calibrated, Szilagyi)"]) +
+    labs(title=paste(site, "- Szilagyi (monthly)"),
+         x="PT–Szilagyi ET (mm/day)", y="Hamon ET (mm/day)") +
+    theme_bw() + theme(panel.grid=element_blank(), legend.position="none")
+  
+  # Panel 4: Interpolated Szilagyi
+  p4 <- ggplot(d, aes(x = ET_PT_szilagyi)) +
+    geom_point(aes(y = ET_Hamon_pt_szilagyi_interp_full,
+                   color = "Hamon (Interpolated, Szilagyi)"),
+               size=1.2, alpha=0.7) +
+    geom_abline(slope=1, intercept=0, linetype="dashed") +
+    scale_color_manual(values = method_colors["Hamon (Interpolated, Szilagyi)"]) +
+    labs(title=paste(site, "- Szilagyi (interpolated)"),
+         x="PT–Szilagyi ET (mm/day)", y=NULL) +
+    theme_bw() + theme(panel.grid=element_blank(), legend.position="none")
+  
+  # Combine into 2×2 with shared legend
+  combo <- (p1 + p2) / (p3 + p4) +
+    plot_layout(guides="collect") &
+    theme(legend.position="bottom",
+          legend.title=element_blank())
+  
+  ggsave(file.path(scatter_dir, paste0("scatter_calibration_4panel_", site, ".png")),
+         combo, width=16, height=12)
 }
 
 # --- 3a. PER-SITE FULL-RECORD TIME SERIES --------------------------

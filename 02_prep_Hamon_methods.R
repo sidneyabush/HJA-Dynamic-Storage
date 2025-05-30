@@ -195,3 +195,18 @@ write_csv(
   WB_data,
   file.path(output_dir, "daily_water_balance_all_ET_methods_1997_present.csv")
 )
+
+# --- 14. Drop all the temporary coefficient & prediction columns ---
+WB_data_final_ET <- data %>%
+  dplyr::select(-RH_d_pct, -NR_Wm2_d,-VPD_kPa, 
+         -contains("szilagyi"),
+         -contains("monthly"),
+         -contains("uncalibrated"), 
+         -ET_PT_zhang) %>%
+  dplyr::rename(ET_mm_d = ET_Hamon_pt_zhang_interp_full)
+
+# --- 15. Export the fully‐filled daily water‐balance record (no Hamon gaps) ---
+write_csv(
+  WB_data_final_ET,
+  file.path(output_dir, "daily_water_balance_ET_Hamon-Zhang_coeff_interp.csv")
+)
