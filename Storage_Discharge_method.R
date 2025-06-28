@@ -174,3 +174,19 @@ ggplot(annual_vol, aes(x = year, y = S_annual_mm, color = site, group = site)) +
     color = "Site"
   ) +
   theme_minimal()
+
+
+# 8) Save raw annual depths & extremes (mm)
+write.csv(
+  annual,
+  file = file.path(output_dir, "dynamic_storage_annual_mm_metrics_per_site_year.csv"),
+  row.names = FALSE
+)
+
+# 9) Save annual depths & volumes (mm + m³)
+write.csv(
+  annual_vol,
+  file = file.path(output_dir, "storage_annual_per_site_year.csv"),
+  row.names = FALSE
+)
+
