@@ -1350,7 +1350,8 @@ triplet_models <- plot_triplet_station_comparisons(interpolated_data)
 discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv"), show_col_types = FALSE) %>%
   mutate(
     DATE     = parse_my_date(DATE),
-    SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK")
+    SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK"),
+    SITECODE = recode(SITECODE, "GSLOOK" = "GSLOOK_FULL")
   ) %>%
   # drop the two halves so you don’t double‐count them
   filter(SITECODE != "GSWSMA", SITECODE != "GSWSMF") %>%
@@ -1392,10 +1393,11 @@ gslook_full_df <- all_watersheds_data %>%
 
 # ---- 3. Add GSLOOK discharge ----
 da_df <- read_csv(file.path(met_dir, "drainage_area.csv"), show_col_types = FALSE) %>%
-  mutate(SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK"))
+  mutate(SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK"),
+         SITECODE = recode(SITECODE, "GSLOOK" = "GSLOOK_FULL"))
 
 gslook_q <- discharge %>%
-  filter(SITECODE == "GSLOOK") %>%
+  filter(SITECODE == "GSLOOK_FULL") %>%
   left_join(da_df, by = "SITECODE") %>%
   mutate(
     Q_m3s  = MEAN_Q * 0.0283168,
