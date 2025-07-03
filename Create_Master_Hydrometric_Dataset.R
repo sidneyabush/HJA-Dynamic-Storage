@@ -1397,7 +1397,7 @@ da_df <- read_csv(file.path(met_dir, "drainage_area.csv"), show_col_types = FALS
          SITECODE = recode(SITECODE, "GSLOOK" = "GSLOOK_FULL"))
 
 gslook_q <- discharge %>%
-  filter(SITECODE == "GSLOOK_FULL") %>%
+  filter(SITECODE == "GSLOOK") %>%
   left_join(da_df, by = "SITECODE") %>%
   mutate(
     Q_m3s  = MEAN_Q * 0.0283168,
@@ -1405,13 +1405,27 @@ gslook_q <- discharge %>%
   ) %>%
   select(DATE, Q_mm_d)
 
-gslook_full_df <- gslook_full_df %>% left_join(gslook_q, by = "DATE")
+# 1) compute GSLOOK_FULL discharge
+gslook_raw_q <- discharge %>%
+  filter(SITECODE == "GSLOOK") %>%
+  left_join(da_df, by = "SITECODE") %>%
+  mutate(
+    Q_mm_d   = MEAN_Q * 0.0283168 * 86400 / DA_M2,
+    SITECODE = "GSLOOK_FULL"
+  ) %>%
+  select(DATE, SITECODE, Q_mm_d)
 
-# ---- 4. Reassemble final datasets ----
+# 2) attach Q_mm_d to your composite df
+gslook_full_df <- gslook_full_df %>%
+  left_join(gslook_raw_q, by = c("DATE", "SITECODE"))
+
+# 3) rebuild your master table in one go
 all_watersheds_data <- bind_rows(
   all_watersheds_data %>% filter(SITECODE != "GSLOOK_FULL"),
   gslook_full_df
 )
+
+# 4) keep your list up to date
 watershed_datasets[["GSLOOK_FULL"]] <- gslook_full_df
 
 # ---- 5. Check for NAs ----
