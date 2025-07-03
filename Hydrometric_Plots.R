@@ -11,7 +11,7 @@ library(tidyr)
 library(multcompView)
 library(lubridate)
 
-theme_set(theme_classic(base_size = 14))
+theme_set(theme_classic(base_size = 16))
 
 # Clear environment
 rm(list = ls())
@@ -221,7 +221,7 @@ p_grid <- ggplot(summary_all, aes(site, mean_val, color = site)) +
   geom_point(size = 2) +
   geom_errorbar(aes(ymin = mean_val - sd_val, ymax = mean_val + sd_val),
                 width = 0.2) +
-  geom_text(aes(label = group, y = label_y), size = 3, vjust = 0) +
+  geom_text(aes(label = group, y = label_y), size = 3.5, vjust = 0) +
   facet_wrap(~ metric, ncol = 2, scales = "free_y",
              labeller = as_labeller(axis_labels)) +
   scale_x_discrete(limits = site_order) +
@@ -239,5 +239,5 @@ ggsave(
   "grid_all_methods.png",
   plot  = p_grid,
   path  = output_dir,
-  width = 9, height = 10, units = "in", dpi = 300
+  width = 11, height = 12.5, units = "in", dpi = 300
 )
