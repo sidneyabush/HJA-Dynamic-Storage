@@ -1350,12 +1350,9 @@ triplet_models <- plot_triplet_station_comparisons(interpolated_data)
 discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv"), show_col_types = FALSE) %>%
   mutate(
     DATE     = parse_my_date(DATE),
-    SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK"),
-    SITECODE = recode(SITECODE, "GSLOOK" = "GSLOOK_FULL")
-  ) %>%
-  # drop the two halves so you don’t double‐count them
-  filter(SITECODE != "GSWSMA", SITECODE != "GSWSMF") %>%
-  # now if any GSWSMC rows remain, they’ll all be GSMACK; collapse by summing
+    SITECODE = recode(SITECODE,
+                      "GSWSMC" = "GSMACK")) %>%
+  filter(!SITECODE %in% c("GSWSMA", "GSWSMF")) %>%
   group_by(DATE, SITECODE) %>%
   summarise(
     MEAN_Q = sum(MEAN_Q, na.rm = TRUE),
@@ -1380,80 +1377,63 @@ all_watersheds_data <- bind_rows(watershed_datasets) %>%
 # Update variable list for the final NA‐counts and summaries
 variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "VPD_kPa", "Q_mm_d")
 
-# ---- 1. Define component sites for GSLOOK_FULL ----
-gslook_components <- c("GSWS01","GSWS06","LONGER","COLD")
+# 1) Read drainage areas and recode GSLOOK → GSLOOK_FULL
+da_df <- read_csv(file.path(met_dir, "drainage_area.csv"), show_col_types = FALSE) %>%
+  mutate(
+    SITECODE = recode(
+      SITECODE,
+      "GSWSMC" = "GSMACK",
+      "GSLOOK" = "GSLOOK_FULL"
+    )
+  )
 
-# ---- 2. Build GSLOOK_FULL composite (no Q_mm_d yet) ----
+# 2) Define which sites go into the composite
+gslook_components <- c("GSWS01", "GSWS06", "LONGER", "COLD")
+
+# 3) Build GSLOOK_FULL composite **without** Q_mm_d
 gslook_full_df <- all_watersheds_data %>%
   filter(SITECODE %in% gslook_components) %>%
   group_by(DATE) %>%
-  summarise(across(where(is.numeric), ~mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+  summarise(
+    across(where(is.numeric), ~mean(.x, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
   mutate(SITECODE = "GSLOOK_FULL") %>%
   select(DATE, SITECODE, everything())
 
-# ---- 3. Add GSLOOK discharge ----
-da_df <- read_csv(file.path(met_dir, "drainage_area.csv"), show_col_types = FALSE) %>%
-  mutate(SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK"),
-         SITECODE = recode(SITECODE, "GSLOOK" = "GSLOOK_FULL"))
-
-gslook_q <- discharge %>%
+# 4) Compute GSLOOK_FULL discharge from the raw "GSLOOK" records:
+gslook_q_full <- discharge %>%
   filter(SITECODE == "GSLOOK") %>%
   left_join(da_df, by = "SITECODE") %>%
   mutate(
-    Q_m3s  = MEAN_Q * 0.0283168,
-    Q_mm_d = Q_m3s * 86400 / DA_M2 * 1000
-  ) %>%
-  select(DATE, Q_mm_d)
-
-# 1) compute GSLOOK_FULL discharge
-gslook_raw_q <- discharge %>%
-  filter(SITECODE == "GSLOOK") %>%
-  left_join(da_df, by = "SITECODE") %>%
-  mutate(
+    # convert m³/s to mm/day: 1 m³/s = 0.0283168 m³/s → mm/day over DA_M2
     Q_mm_d   = MEAN_Q * 0.0283168 * 86400 / DA_M2,
     SITECODE = "GSLOOK_FULL"
   ) %>%
   select(DATE, SITECODE, Q_mm_d)
 
-# 2) attach Q_mm_d to your composite df
+# 5) Attach discharge onto the composite
 gslook_full_df <- gslook_full_df %>%
-  left_join(gslook_raw_q, by = c("DATE", "SITECODE"))
+  left_join(gslook_q_full, by = c("DATE", "SITECODE"))
 
-# 3) rebuild your master table in one go
+# 6) Re-assemble your master table
 all_watersheds_data <- bind_rows(
-  all_watersheds_data %>% filter(SITECODE != "GSLOOK_FULL"),
+  all_watersheds_data      %>% filter(SITECODE != "GSLOOK_FULL"),
   gslook_full_df
 )
 
-# 4) keep your list up to date
+# 7) And keep your list of per-site tibbles in sync
 watershed_datasets[["GSLOOK_FULL"]] <- gslook_full_df
 
-# ---- 5. Check for NAs ----
-watershed_na_counts <- all_watersheds_data %>%
-  group_by(SITECODE) %>%
-  summarise(across(all_of(variables), ~sum(is.na(.)), .names = "NA_{.col}"))
-print(watershed_na_counts)
-
-# Summary statistics for the watersheds dataset
-summary_stats <- all_watersheds_data %>%
-  group_by(SITECODE) %>%
-  summarise(across(all_of(variables), 
-                   list(
-                     mean = ~mean(., na.rm = TRUE),
-                     min = ~min(., na.rm = TRUE),
-                     max = ~max(., na.rm = TRUE),
-                     n = ~sum(!is.na(.))
-                   )))
-
-# Create specific triplet comparison plots for RH
-triplet_models <- plot_triplet_station_comparisons(interpolated_data)
-
-# Create summary time series plots for each watershed
-create_site_summary_plots(watershed_datasets, site_mapping, variables)
-
-# Ensure columns are in the correct order: DATE, SITECODE, then others
-all_watersheds_data <- all_watersheds_data %>%
-  select(DATE, SITECODE, everything()) %>%
+all_watersheds_data <- bind_rows(
+  all_watersheds_data      %>% filter(SITECODE != "GSLOOK_FULL"),
+  gslook_full_df
+) %>%
+  # merge the two Q_mm_d variants into one
+  mutate(
+    Q_mm_d = coalesce(Q_mm_d.x, Q_mm_d)      # if you also had a Q_mm_d.y, you can do coalesce(Q_mm_d.x, Q_mm_d.y, Q_mm_d)
+  ) %>%
+  # drop the leftover suffixed column(s)
   select(-Q_mm_d.x, -Q_mm_d.y)
 
 # Write the watersheds data to files (NOT the met station data)
