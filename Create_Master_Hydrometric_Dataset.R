@@ -65,10 +65,13 @@ make_inter_long <- function(fname, var) {
 
 read_mack_precip <- function(fname) {
   read_csv(file.path(met_dir, fname), show_col_types = FALSE) %>%
-    mutate(DATE = parse_my_date(DATE)) %>%
-    filter(SITECODE == "GSMACK") %>%  # Only keep GSMACK site data
+    mutate(
+      DATE     = parse_my_date(DATE),
+      SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK")
+    ) %>%
+    filter(SITECODE == "GSMACK") %>%
     select(DATE, SITECODE, PRECIP_TOT_DAY) %>%
-    rename(P_mm_d = PRECIP_TOT_DAY)  # Rename to match your naming convention
+    rename(P_mm_d = PRECIP_TOT_DAY)
 }
 
 calculate_vpd <- function(temp_celsius, rh_percent) {
@@ -1221,7 +1224,7 @@ add_discharge_to_watersheds <- function(watershed_datasets, discharge) {
       DATE   = parse_my_date(DATE),    # handles both “YYYY-MM-DD” and Excel serials
       Q_mm_d = MEAN_Q * 0.0283168 * 86400 / DA_M2 * 1000
     ) %>%
-    select(DATE, SITECODE, Q_mm_d)
+    dplyr::select(DATE, SITECODE, Q_mm_d)
   
   # Add discharge data to each watershed dataset
   for (site_name in names(watershed_datasets)) {
@@ -1241,8 +1244,9 @@ add_discharge_to_watersheds <- function(watershed_datasets, discharge) {
 }
 
 ###########################
-# PART 3: DATA PROCESSING #
+# PART 3: DATA PROCESSING #----
 ###########################
+
 # Set the data directory
 met_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/03_Data/all_hydromet"
 
@@ -1250,20 +1254,42 @@ met_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript
 output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscript/05_Outputs/MET"
 
 # Create output directories if they don't exist
-dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(output_dir,      showWarnings = FALSE, recursive = TRUE)
 dir.create(file.path(output_dir, "plots"), showWarnings = FALSE)
-dir.create(file.path(output_dir, "data"), showWarnings = FALSE)
+dir.create(file.path(output_dir, "data"),  showWarnings = FALSE)
+
+# --- helper: add Q_mm_d to each watershed dataset, without re-parsing DATE ---
+add_discharge_to_watersheds <- function(watershed_datasets, discharge) {
+  da_df <- read_csv(file.path(met_dir, "drainage_area.csv"), show_col_types = FALSE) %>%
+    mutate(SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK"))
+  
+  discharge_processed <- discharge %>%
+    left_join(da_df, by = "SITECODE") %>%
+    filter(!is.na(DA_M2)) %>%
+    mutate(Q_mm_d = MEAN_Q * 0.0283168 * 86400 / DA_M2 * 1000) %>%
+    select(DATE, SITECODE, Q_mm_d)
+  
+  for (site_name in names(watershed_datasets)) {
+    site_dis <- discharge_processed %>% filter(SITECODE == site_name)
+    if (nrow(site_dis) > 0) {
+      watershed_datasets[[site_name]] <-
+        watershed_datasets[[site_name]] %>%
+        left_join(site_dis, by = "DATE")
+    }
+  }
+  
+  watershed_datasets
+}
 
 # Load temperature data
-Temp <- make_inter_long("Temperature_original_&_filled_1979_2023_v2.csv", "Temp")
-Temp <- Temp %>%
-  dplyr::select(DATE, SITECODE, Temp) %>%
-  dplyr::rename(T_C = Temp)
+Temp <- make_inter_long("Temperature_original_&_filled_1979_2023_v2.csv", "Temp") %>%
+  select(DATE, SITECODE, Temp) %>%
+  rename(T_C = Temp)
 
-Precip <- make_inter_long("Precipitation_original_&_filled_1979_2023.csv",  "Precip")
-Precip <- Precip %>%
-  dplyr::select(DATE, SITECODE, Precip) %>%
-  dplyr::rename(P_mm_d = Precip)
+# Load precipitation data
+Precip <- make_inter_long("Precipitation_original_&_filled_1979_2023.csv", "Precip") %>%
+  select(DATE, SITECODE, Precip) %>%
+  rename(P_mm_d = Precip)
 
 # Add GSMACK precipitation data
 MACK_Precip <- read_mack_precip("MS00403_v2.csv")
@@ -1272,168 +1298,124 @@ Precip <- bind_rows(Precip, MACK_Precip)
 # Load relative humidity data
 RH <- read_csv(file.path(met_dir, "MS00102_v9.csv"), show_col_types = FALSE) %>%
   mutate(DATE = parse_my_date(DATE)) %>%
-  dplyr::select(SITECODE, DATE, RELHUM_MEAN_DAY) %>%
-  dplyr::rename(RH_d_pct = RELHUM_MEAN_DAY)
+  select(SITECODE, DATE, RELHUM_MEAN_DAY) %>%
+  rename(RH_d_pct = RELHUM_MEAN_DAY)
 
 # Load net radiation data
 NetRad <- read_csv(file.path(met_dir, "MS05025_v3.csv"), show_col_types = FALSE) %>%
   mutate(DATE = parse_my_date(DATE)) %>%
   select(SITECODE, DATE, NR_TOT_MEAN_DAY) %>%
-  dplyr::rename(NR_Wm2_d = NR_TOT_MEAN_DAY)
+  rename(NR_Wm2_d = NR_TOT_MEAN_DAY)
 
-# Combine all datasets
+# Combine all meteorological datasets
 combined_met <- Temp %>%
-  full_join(Precip, by = c("DATE", "SITECODE")) %>%
-  full_join(RH,     by = c("DATE", "SITECODE")) %>%
-  full_join(NetRad, by = c("DATE", "SITECODE")) %>%
+  full_join(Precip, by = c("DATE","SITECODE")) %>%
+  full_join(RH,     by = c("DATE","SITECODE")) %>%
+  full_join(NetRad, by = c("DATE","SITECODE")) %>%
   filter(DATE >= ymd("1997-10-01")) %>%
   arrange(SITECODE, DATE)
 
-# Define the site mapping based on the complete table
+# Define the site mapping
 site_mapping <- list(
-  # Site = list(Temp stations, Precip stations, RH stations, NetRad stations)
-  "GSWS09" = list(temp = c("PRIMET"), 
-                  precip = c("PRIMET"), 
-                  rh = c("PRIMET", "CS2MET"), 
-                  netrad = c("PRIMET")),
-  
-  "GSWS10" = list(temp = c("PRIMET"), 
-                  precip = c("PRIMET"), 
-                  rh = c("PRIMET", "CS2MET"), 
-                  netrad = c("PRIMET")),
-  
-  "GSWS01" = list(temp = c("PRIMET"), 
-                  precip = c("PRIMET"), 
-                  rh = c("PRIMET", "CS2MET"), 
-                  netrad = c("PRIMET")),
-  
-  "GSWS02" = list(temp = c("PRIMET"), 
-                  precip = c("PRIMET"), 
-                  rh = c("PRIMET", "CS2MET"), 
-                  netrad = c("PRIMET")),
-  
-  "GSWS03" = list(temp = c("PRIMET"), 
-                  precip = c("PRIMET"), 
-                  rh = c("PRIMET", "CS2MET"), 
-                  netrad = c("PRIMET")),
-  
-  "GSMACK" = list(temp = c("CENMET", "UPLMET"), 
-                  precip = c("GSMACK", "UPLMET"), 
-                  rh = c("CENMET", "UPLMET"), 
-                  netrad = c("VANMET")),
-  
-  "GSWS06" = list(temp = c("H15MET", "VANMET"), 
-                  precip = c("H15MET"), 
-                  rh = c("H15MET", "VANMET", "WS7MET"), 
-                  netrad = c("VANMET")),
-  
-  "GSWS07" = list(temp = c("H15MET", "VANMET"), 
-                  precip = c("H15MET"), 
-                  rh = c("H15MET", "VANMET", "WS7MET"), 
-                  netrad = c("VANMET")),
-  
-  "GSWS08" = list(temp = c("H15MET", "VANMET"), 
-                  precip = c("H15MET"), 
-                  rh = c("H15MET", "VANMET", "WS7MET"), 
-                  netrad = c("VANMET")),
-  
-  "LONGER" = list(temp = c("CENMET"), 
-                  precip = c("CENMET"), 
-                  rh = c("CENMET"), 
-                  netrad = c("VANMET")),
-  
-  "COLD" = list(temp = c("CENMET", "UPLMET"), 
-                precip = c("CENMET", "UPLMET"), 
-                rh = c("CENMET", "UPLMET"), 
-                netrad = c("VANMET"))
+  "GSWS09" = list(temp=c("PRIMET"),     precip=c("PRIMET"),     rh=c("PRIMET","CS2MET"), netrad=c("PRIMET")),
+  "GSWS10" = list(temp=c("PRIMET"),     precip=c("PRIMET"),     rh=c("PRIMET","CS2MET"), netrad=c("PRIMET")),
+  "GSWS01" = list(temp=c("PRIMET"),     precip=c("PRIMET"),     rh=c("PRIMET","CS2MET"), netrad=c("PRIMET")),
+  "GSWS02" = list(temp=c("PRIMET"),     precip=c("PRIMET"),     rh=c("PRIMET","CS2MET"), netrad=c("PRIMET")),
+  "GSWS03" = list(temp=c("PRIMET"),     precip=c("PRIMET"),     rh=c("PRIMET","CS2MET"), netrad=c("PRIMET")),
+  "GSMACK" = list(temp=c("CENMET","UPLMET"), precip=c("GSMACK","UPLMET"), rh=c("CENMET","UPLMET"), netrad=c("VANMET")),
+  "GSWS06" = list(temp=c("H15MET","VANMET"), precip=c("H15MET"),       rh=c("H15MET","VANMET","WS7MET"), netrad=c("VANMET")),
+  "GSWS07" = list(temp=c("H15MET","VANMET"), precip=c("H15MET"),       rh=c("H15MET","VANMET","WS7MET"), netrad=c("VANMET")),
+  "GSWS08" = list(temp=c("H15MET","VANMET"), precip=c("H15MET"),       rh=c("H15MET","VANMET","WS7MET"), netrad=c("VANMET")),
+  "LONGER" = list(temp=c("CENMET"),     precip=c("CENMET"),     rh=c("CENMET"),         netrad=c("VANMET")),
+  "COLD"   = list(temp=c("CENMET","UPLMET"), precip=c("CENMET","UPLMET"), rh=c("CENMET","UPLMET"), netrad=c("VANMET"))
 )
 
-# Variables mapping between the site mapping and the actual data columns
-variable_mapping <- list(
-  temp = "T_C",
-  precip = "P_mm_d",
-  rh = "RH_d_pct",
-  netrad = "NR_Wm2_d"
-)
+# Variables to process (only the met vars here—VPD will be computed internally)
+variables <- c("T_C","P_mm_d","RH_d_pct","NR_Wm2_d")
 
-# Variables to process (meteorological variables only first)
-variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d")
-
-# Run the main process
-# VPD will be calculated after interpolating temperature and RH
+# Run interpolation & VPD calculation
 results <- process_meteorological_data(combined_met, site_mapping, variables)
 
-# Extract the results
-interpolated_data <- results$interpolated_data
-watershed_datasets <- results$watershed_datasets
-all_watersheds_data <- results$all_watersheds_data
-interpolated_pairs <- results$interpolated_pairs
+# **CORRECT** assignments from the results list:
+interpolated_data     <- results$interpolated_data
+watershed_datasets    <- results$watershed_datasets
+all_watersheds_data   <- results$all_watersheds_data
+interpolated_pairs    <- results$interpolated_pairs
 interpolated_triplets <- results$interpolated_triplets
 
-# Load and add discharge data
-discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv")) %>%
+# Now that interpolated_data exists, this works:
+triplet_models <- plot_triplet_station_comparisons(interpolated_data)
+
+# read + collapse GSWSMC → GSMACK (dropping the halves)
+discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv"), show_col_types = FALSE) %>%
   mutate(
+    DATE     = parse_my_date(DATE),
     SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK")
+  ) %>%
+  # drop the two halves so you don’t double‐count them
+  filter(SITECODE != "GSWSMA", SITECODE != "GSWSMF") %>%
+  # now if any GSWSMC rows remain, they’ll all be GSMACK; collapse by summing
+  group_by(DATE, SITECODE) %>%
+  summarise(
+    MEAN_Q = sum(MEAN_Q, na.rm = TRUE),
+    .groups = "drop"
   )
 
+# stitch Q_mm_d into each watershed
 watershed_datasets <- add_discharge_to_watersheds(watershed_datasets, discharge)
 
-# Update variables to include discharge and VPD
+# **and then** immediately rebuild your master table so Q_mm_d shows up:
+all_watersheds_data <- dplyr::bind_rows(watershed_datasets)
+
+all_watersheds_data <- bind_rows(watershed_datasets) %>%
+  # remove the stray SITECODE column
+  select(-SITECODE, -SITECODE.y) %>%
+  # rename the joined‐in SITECODE.x back to SITECODE
+  rename(SITECODE = SITECODE.x) %>%
+  # optional: reorder so DATE, SITECODE come first
+  select(DATE, SITECODE, everything())
+
+
+# Update variable list for the final NA‐counts and summaries
 variables <- c("T_C", "P_mm_d", "RH_d_pct", "NR_Wm2_d", "VPD_kPa", "Q_mm_d")
 
-# ---- 1. Define component sites for each elevation ----
-gslook_components <- c("GSWS01", "GSWS06", "LONGER", "COLD")
+# ---- 1. Define component sites for GSLOOK_FULL ----
+gslook_components <- c("GSWS01","GSWS06","LONGER","COLD")
 
-# ---- 2. Create the GSLOOK_FULL composite (average of components; Q_mm_d not present yet) ----
+# ---- 2. Build GSLOOK_FULL composite (no Q_mm_d yet) ----
 gslook_full_df <- all_watersheds_data %>%
   filter(SITECODE %in% gslook_components) %>%
   group_by(DATE) %>%
-  summarise(
-    across(where(is.numeric), ~mean(.x, na.rm = TRUE)),
-    .groups = "drop"
-  ) %>%
+  summarise(across(where(is.numeric), ~mean(.x, na.rm = TRUE)), .groups = "drop") %>%
   mutate(SITECODE = "GSLOOK_FULL") %>%
   select(DATE, SITECODE, everything())
 
-# ---- 3. Add discharge from GSLOOK site only (Q_mm_d) ----
-# Instead of all_watersheds_data, compute from raw discharge data
-da_df <- read_csv(file.path(met_dir, "drainage_area.csv")) %>%
-  dplyr::mutate(
-    SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK")
-  )
-
+# ---- 3. Add GSLOOK discharge ----
+da_df <- read_csv(file.path(met_dir, "drainage_area.csv"), show_col_types = FALSE) %>%
+  mutate(SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK"))
 
 gslook_q <- discharge %>%
   filter(SITECODE == "GSLOOK") %>%
   left_join(da_df, by = "SITECODE") %>%
   mutate(
-    DATE   = as.Date(DATE, "%m/%d/%Y"),
-    Q_m3s  = MEAN_Q * 0.0283168,              
-    Q_mm_d = Q_m3s * 86400 / DA_M2 * 1000    
+    Q_m3s  = MEAN_Q * 0.0283168,
+    Q_mm_d = Q_m3s * 86400 / DA_M2 * 1000
   ) %>%
   select(DATE, Q_mm_d)
 
-# Add Q_mm_d to GSLOOK_FULL
-gslook_full_df <- gslook_full_df %>%
-  #dplyr::select(-Q_mm_d, everything()) %>%  # in case the averaging created a (mostly NA) Q_mm_d
-  left_join(gslook_q, by = "DATE")
+gslook_full_df <- gslook_full_df %>% left_join(gslook_q, by = "DATE")
 
-# ---- 4. Combine with all other watersheds ----
-all_watersheds_data <- all_watersheds_data %>%
-  filter(SITECODE != "GSLOOK_FULL") %>%
-  bind_rows(gslook_full_df)
-
+# ---- 4. Reassemble final datasets ----
+all_watersheds_data <- bind_rows(
+  all_watersheds_data %>% filter(SITECODE != "GSLOOK_FULL"),
+  gslook_full_df
+)
 watershed_datasets[["GSLOOK_FULL"]] <- gslook_full_df
 
-# Combine updated watershed datasets (ensures all have Q_mm_d)
-all_watersheds_data <- bind_rows(watershed_datasets)
-
-# Check for NAs in the watershed data
+# ---- 5. Check for NAs ----
 watershed_na_counts <- all_watersheds_data %>%
   group_by(SITECODE) %>%
   summarise(across(all_of(variables), ~sum(is.na(.)), .names = "NA_{.col}"))
-
-print("NA counts by watershed:")
 print(watershed_na_counts)
 
 # Summary statistics for the watersheds dataset
@@ -1455,69 +1437,8 @@ create_site_summary_plots(watershed_datasets, site_mapping, variables)
 
 # Ensure columns are in the correct order: DATE, SITECODE, then others
 all_watersheds_data <- all_watersheds_data %>%
-  select(DATE, SITECODE, everything())
+  select(DATE, SITECODE, everything()) %>%
+  select(-Q_mm_d.x, -Q_mm_d.y)
 
 # Write the watersheds data to files (NOT the met station data)
 write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_data_q.csv"))
-
-# Write individual watershed files with VPD
-# for (site_name in names(watershed_datasets)) {
-#   write_csv(watershed_datasets[[site_name]],
-#             file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
-# }
-
-# ---- 5. Report Met Stations Used per Watershed and Variable ----
-
-# Define the mapping of variables clearly
-variable_station_mapping <- lapply(site_mapping, function(vars) {
-  list(
-    Temperature = vars$temp,
-    Precipitation = vars$precip,
-    Relative_Humidity = vars$rh,
-    Net_Radiation = vars$netrad,
-    VPD = vars$temp, # VPD is calculated from temperature & RH stations (same as temp here)
-    Discharge = "Gauge station" # Explicitly state discharge data origin
-  )
-})
-
-# Convert to a readable dataframe
-station_usage_df <- do.call(rbind, lapply(names(variable_station_mapping), function(site) {
-  vars <- variable_station_mapping[[site]]
-  data.frame(
-    SITECODE = site,
-    Temperature = paste(vars$Temperature, collapse = ", "),
-    Precipitation = paste(vars$Precipitation, collapse = ", "),
-    Relative_Humidity = paste(vars$Relative_Humidity, collapse = ", "),
-    Net_Radiation = paste(vars$Net_Radiation, collapse = ", "),
-    VPD = paste(vars$VPD, collapse = ", "),
-    Discharge = vars$Discharge,
-    stringsAsFactors = FALSE
-  )
-}))
-
-# Save this mapping to a CSV for reference
-write_csv(station_usage_df, file.path(output_dir, "data", "watershed_met_station_usage.csv"))
-
-# ---- ADD MET STATION COLUMNS TO FINAL OUTPUT ----
-
-# First, create a tidy dataframe from the site_mapping for easy joining
-station_columns <- site_mapping %>%
-  purrr::imap_dfr(~ data.frame(
-    SITECODE = .y,
-    Temp_stations = paste(.x$temp, collapse = ", "),
-    Precip_stations = paste(.x$precip, collapse = ", "),
-    RH_stations = paste(.x$rh, collapse = ", "),
-    NetRad_stations = paste(.x$netrad, collapse = ", "),
-    VPD_stations = paste(unique(c(.x$temp, .x$rh)), collapse = ", "), # both temp and RH stations
-    Discharge_stations = "Gauge station",
-    stringsAsFactors = FALSE
-  ))
-
-# Now join this back to your final all_watersheds_data
-all_watersheds_data <- all_watersheds_data %>%
-  left_join(station_columns, by = "SITECODE")
-
-# Write the updated dataset
-write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_data_q_with_stations.csv"))
-
-
