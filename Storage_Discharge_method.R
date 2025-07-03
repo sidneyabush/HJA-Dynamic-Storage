@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# Dynamic Storage: Overall + Annual per Site
+# Dynamic Storage: Overall + Annual per Site (water-year)
 # (excluding COLD, LONGER, GSWSMC, GSMACK; outputs in mm and m³)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -16,20 +16,33 @@ output_dir <- "/Users/sidneybush/Library/CloudStorage/Box-Box/05_Storage_Manuscr
 input_file <- file.path(data_dir, "daily_water_balance_ET_Hamon-Zhang_coeff_interp.csv")
 stopifnot(file.exists(input_file))
 
-# 2) Read data and drop unwanted sites
-#    Rename columns and add calendar year
+# 2) Read data, drop unwanted sites, parse date & compute water-year
+library(lubridate)
+
 df <- read.csv(input_file, stringsAsFactors = FALSE) %>%
-  mutate(DATE = as.Date(DATE)) %>%
+  mutate(
+    # robustly parse DATE into a Date object
+    date = parse_date_time(
+      DATE,
+      orders = c("Ymd", "Y-m-d", "mdy", "dmy")
+    ) %>% as.Date(),
+    
+    # water-year: Oct–Dec → next calendar year, Jan–Sep → same year
+    wateryear = if_else(
+      month(date) >= 10,
+      year(date) + 1,
+      year(date)
+    )
+  ) %>%
   rename(
-    date = DATE,
     site = SITECODE,
     P    = P_mm_d,
     Q    = Q_mm_d,
     ET   = ET_mm_d
   ) %>%
-  filter(!site %in% c("COLD", "LONGER", "GSWSMC", "GSMACK")) %>%
-  arrange(site, date) %>%
-  mutate(year = year(date))
+  filter(!site %in% c("COLD", "LONGER")) %>%
+  arrange(site, date)
+
 
 # 3) Helper functions
 compute_fdc <- function(Q) {
@@ -40,17 +53,15 @@ compute_fdc <- function(Q) {
   exc  <- (r - 0.44) / (n + 0.12) * 100
   tibble(exceedance = exc, Q = Qs)
 }
-
 get_Q <- function(fdc, P_exc) {
   if (nrow(fdc) < 2) return(NA_real_)
   approx(fdc$exceedance, fdc$Q, xout = P_exc)$y
 }
-
 deltaS <- function(Qu, Ql, k, p) {
   (Qu^(2 - p) - Ql^(2 - p)) / (k * (2 - p))
 }
 
-# 4) Site-year analysis function with annual-mean extremes
+# 4) Site-water-year analysis function
 analyze <- function(df_sub) {
   # 4.1 Flow-duration thresholds
   fdc  <- compute_fdc(df_sub$Q)
@@ -62,9 +73,9 @@ analyze <- function(df_sub) {
       k = NA_real_, p = NA_real_,
       Q_max = NA_real_, Q_min = NA_real_,
       Q99 = Q99, Q50 = Q50, Q01 = Q01,
-      S_annual_mm = NA_real_,
+      S_annual_mm   = NA_real_,
       S_high_med_mm = NA_real_,
-      S_med_low_mm = NA_real_
+      S_med_low_mm  = NA_real_
     ))
   }
   
@@ -72,8 +83,8 @@ analyze <- function(df_sub) {
   tmp <- df_sub %>%
     arrange(date) %>%
     mutate(
-      dt = as.numeric(difftime(date, lag(date), "days")),
-      dQ = (lag(Q) - Q) / dt,
+      dt      = as.numeric(difftime(date, lag(date), "days")),
+      dQ      = (lag(Q) - Q) / dt,
       is_rain = P > 0
     )
   rec <- tmp %>% filter(!is_rain, !is.na(dQ), dQ > 0, Q > 0)
@@ -82,9 +93,9 @@ analyze <- function(df_sub) {
       k = NA_real_, p = NA_real_,
       Q_max = NA_real_, Q_min = NA_real_,
       Q99 = Q99, Q50 = Q50, Q01 = Q01,
-      S_annual_mm = NA_real_,
+      S_annual_mm   = NA_real_,
       S_high_med_mm = NA_real_,
-      S_med_low_mm = NA_real_
+      S_med_low_mm  = NA_real_
     ))
   }
   
@@ -93,21 +104,18 @@ analyze <- function(df_sub) {
   p_est <- coef(fit)["log(Q)"]
   k_est <- exp(coef(fit)["(Intercept)"])
   
-  # 4.4 Compute annual-mean extremes
+  # 4.4 Compute annual-mean extremes by water-year
   yearly <- df_sub %>%
-    group_by(year) %>%
+    group_by(wateryear) %>%
     summarize(
       yr_max = if (all(is.na(Q))) NA_real_ else max(Q, na.rm = TRUE),
-      yr_min = if (all(Q <= 0 | is.na(Q))) NA_real_ else min(Q[Q > 0], na.rm = TRUE)
+      yr_min = if (all(Q <= 0 | is.na(Q))) NA_real_ else min(Q[Q > 0], na.rm = TRUE),
+      .groups = "drop"
     )
   Qmax_avg <- mean(yearly$yr_max, na.rm = TRUE)
   Qmin_avg <- mean(yearly$yr_min, na.rm = TRUE)
   
-  # 4.5 Compute dynamic storage depths in mm
-  S_ann_mm   <- deltaS(Qmax_avg, Qmin_avg, k_est, p_est)
-  S_hm_mm    <- deltaS(Q01, Q50, k_est, p_est)
-  S_ml_mm    <- deltaS(Q50, Q99, k_est, p_est)
-  
+  # 4.5 Compute dynamic storage depths
   tibble(
     k             = k_est,
     p             = p_est,
@@ -116,77 +124,68 @@ analyze <- function(df_sub) {
     Q99           = Q99,
     Q50           = Q50,
     Q01           = Q01,
-    S_annual_mm   = S_ann_mm,
-    S_high_med_mm = S_hm_mm,
-    S_med_low_mm  = S_ml_mm
+    S_annual_mm   = deltaS(Qmax_avg, Qmin_avg, k_est, p_est),
+    S_high_med_mm = deltaS(Q01, Q50, k_est, p_est),
+    S_med_low_mm  = deltaS(Q50, Q99, k_est, p_est)
   )
 }
 
-# 5) Compute overall results
-overall <- bind_rows(
-  df %>%
-    group_by(site) %>%
-    group_map(~ analyze(.x) %>% mutate(site = .y$site), .keep = TRUE)
-)
+# 5) Compute overall results (across all water-years)
+overall <- df %>%
+  group_by(site) %>%
+  group_map(~ analyze(.x) %>% mutate(site = .y$site), .keep = TRUE) %>%
+  bind_rows()
 
-# 6) Compute annual results
-annual <- bind_rows(
-  df %>%
-    group_by(site, year) %>%
-    group_map(~ analyze(.x) %>% mutate(site = .y$site, year = .y$year), .keep = TRUE)
-)
+# 6) Compute per-water-year results
+annual <- df %>%
+  group_by(site, wateryear) %>%
+  group_map(~ analyze(.x) %>% 
+              mutate(site = .y$site, wateryear = .y$wateryear),
+            .keep = TRUE) %>%
+  bind_rows()
 
-# 7) Add catchment areas and convert depths to volumes
+# 7) Add catchment areas & convert mm → m³
 areas_ha <- tibble(
   SITECODE = c("GSWS01","GSWS02","GSWS03","GSWS06","GSWS07",
-               "GSWS08","GSWS09","GSWS10","GSLOOK_FULL"),
-  area_ha = c(96, 60, 101, 13.0, 15.4, 21.4, 8.5, 10.2, 6242)
+               "GSWS08","GSWS09","GSWS10", "GSMACK", "GSLOOK_FULL"),
+  area_ha  = c(96, 60, 101, 13.0, 15.4, 21.4, 8.5, 10.2, 580, 6242)
 )
 add_vol <- function(df_in) {
   df_in %>%
     left_join(areas_ha, by = c("site" = "SITECODE")) %>%
     mutate(
-      area_m2 = area_ha * 10000,
-      S_annual_m3   = (S_annual_mm   / 1000) * area_m2,
-      S_high_med_m3 = (S_high_med_mm / 1000) * area_m2,
-      S_med_low_m3  = (S_med_low_mm  / 1000) * area_m2
+      area_m2        = area_ha * 10000,
+      S_annual_m3    = (S_annual_mm   / 1000) * area_m2,
+      S_high_med_m3  = (S_high_med_mm / 1000) * area_m2,
+      S_med_low_m3   = (S_med_low_mm  / 1000) * area_m2
     )
 }
 
 overall_vol <- add_vol(overall)
 annual_vol  <- add_vol(annual)
 
-# 8) Save outputs
-write.csv(overall_vol, file.path(output_dir, "storage_overall_per_site.csv"), row.names = FALSE)
-write.csv(annual_vol,  file.path(output_dir, "storage_annual_per_site_year.csv"), row.names = FALSE)
+# 8) Save outputs (with wateryear in filenames for clarity)
+write.csv(overall_vol,
+          file = file.path(output_dir, "storage_overall_per_site.csv"),
+          row.names = FALSE)
+write.csv(annual,
+          file = file.path(output_dir,
+                           "storage_discharge_method_annual_mm_metrics_per_site_wateryear.csv"),
+          row.names = FALSE)
+write.csv(annual_vol,
+          file = file.path(output_dir,
+                           "storage_discharge_method_annual_vol_per_site_wateryear.csv"),
+          row.names = FALSE)
 
-
-# 9) Quick plot of annual dynamic storage depths
-#    Plots S_annual_mm over years for each site
+# 9) Quick plot of annual dynamic storage depths vs. water-year
 library(ggplot2)
-ggplot(annual_vol, aes(x = year, y = S_annual_mm, color = site, group = site)) +
+ggplot(annual_vol, aes(x = wateryear, y = S_annual_mm, color = site, group = site)) +
   geom_line() +
   geom_point() +
   labs(
-    title = "Annual Dynamic Storage (Depth) per Site",
-    x = "Year",
-    y = "Dynamic Storage (mm)",
+    title = "Annual Dynamic Storage Depth by Water-Year",
+    x     = "Water Year",
+    y     = "Storage Depth (mm)",
     color = "Site"
   ) +
   theme_minimal()
-
-
-# 8) Save raw annual depths & extremes (mm)
-write.csv(
-  annual,
-  file = file.path(output_dir, "dynamic_storage_annual_mm_metrics_per_site_year.csv"),
-  row.names = FALSE
-)
-
-# 9) Save annual depths & volumes (mm + m³)
-write.csv(
-  annual_vol,
-  file = file.path(output_dir, "storage_annual_per_site_year.csv"),
-  row.names = FALSE
-)
-
