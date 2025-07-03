@@ -8,7 +8,6 @@ library(dplyr)
 library(lubridate)
 library(tidyr)
 
-
 rm(list = ls())
 
 parse_my_date <- function(d) {
@@ -1215,14 +1214,12 @@ add_discharge_to_watersheds <- function(watershed_datasets, discharge) {
   # Read drainage area data
   da_df <- read_csv(file.path(met_dir, "drainage_area.csv"))
   
-  # Preprocess discharge data
   discharge_processed <- discharge %>%
     left_join(da_df, by = "SITECODE") %>%
     filter(!is.na(DA_M2)) %>%
     mutate(
-      DATE   = as.Date(DATE, "%m/%d/%Y"),
-      Q_m3s  = MEAN_Q * 0.0283168,             
-      Q_mm_d = Q_m3s * 86400 / DA_M2 * 1000    
+      DATE   = parse_my_date(DATE),    # handles both “YYYY-MM-DD” and Excel serials
+      Q_mm_d = MEAN_Q * 0.0283168 * 86400 / DA_M2 * 1000
     ) %>%
     select(DATE, SITECODE, Q_mm_d)
   
@@ -1263,9 +1260,6 @@ Temp <- Temp %>%
   dplyr::select(DATE, SITECODE, Temp) %>%
   dplyr::rename(T_C = Temp)
 
-# Load precipitation data
-Precip_raw <- read_csv(file.path(met_dir, "Precipitation_original_&_filled_1979_2023.csv"))
-
 Precip <- make_inter_long("Precipitation_original_&_filled_1979_2023.csv",  "Precip")
 Precip <- Precip %>%
   dplyr::select(DATE, SITECODE, Precip) %>%
@@ -1293,7 +1287,6 @@ combined_met <- Temp %>%
   full_join(RH,     by = c("DATE", "SITECODE")) %>%
   full_join(NetRad, by = c("DATE", "SITECODE")) %>%
   filter(DATE >= ymd("1997-10-01")) %>%
-  # filter(DATE <= ymd("2018-09-30")) %>%
   arrange(SITECODE, DATE)
 
 # Define the site mapping based on the complete table
@@ -1378,7 +1371,11 @@ interpolated_pairs <- results$interpolated_pairs
 interpolated_triplets <- results$interpolated_triplets
 
 # Load and add discharge data
-discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv"))
+discharge <- read_csv(file.path(met_dir, "HF00402_v14.csv")) %>%
+  mutate(
+    SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK")
+  )
+
 watershed_datasets <- add_discharge_to_watersheds(watershed_datasets, discharge)
 
 # Update variables to include discharge and VPD
@@ -1400,7 +1397,12 @@ gslook_full_df <- all_watersheds_data %>%
 
 # ---- 3. Add discharge from GSLOOK site only (Q_mm_d) ----
 # Instead of all_watersheds_data, compute from raw discharge data
-da_df <- read_csv(file.path(met_dir, "drainage_area.csv"))
+da_df <- read_csv(file.path(met_dir, "drainage_area.csv")) %>%
+  dplyr::mutate(
+    SITECODE = recode(SITECODE, "GSWSMC" = "GSMACK")
+  )
+
+
 gslook_q <- discharge %>%
   filter(SITECODE == "GSLOOK") %>%
   left_join(da_df, by = "SITECODE") %>%
@@ -1410,8 +1412,6 @@ gslook_q <- discharge %>%
     Q_mm_d = Q_m3s * 86400 / DA_M2 * 1000    
   ) %>%
   select(DATE, Q_mm_d)
-
-
 
 # Add Q_mm_d to GSLOOK_FULL
 gslook_full_df <- gslook_full_df %>%
