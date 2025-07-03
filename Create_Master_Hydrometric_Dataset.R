@@ -3,25 +3,65 @@ library(dplyr)
 library(lubridate)
 library(tidyr)
 library(ggplot2)
+library(readr)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+
 
 rm(list = ls())
 
-# Date parsing function
 parse_my_date <- function(d) {
-  parse_date_time(d,
-                  orders = c("Ymd", "Y-m-d", "mdy", "m/d/Y", "dmy", "d/m/Y")
-  ) %>% as_date()
+  # turn everything into strings
+  dd <- as.character(d)
+  
+  # detect which look like Excel serials (pure digits)
+  is_serial <- grepl("^[0-9]+$", dd)
+  
+  # prepare output
+  out <- rep(as.Date(NA), length(dd))
+  
+  # 1) Excel serials → Date
+  if (any(is_serial)) {
+    out[is_serial] <- as_date(
+      as.numeric(dd[is_serial]),
+      origin = "1899-12-30"
+    )
+  }
+  
+  # 2) everything else → lubridate
+  if (any(!is_serial)) {
+    out[!is_serial] <- parse_date_time(
+      dd[!is_serial],
+      orders = c("Ymd", "Y-m-d", "mdy", "m/d/Y", "dmy", "d/m/Y", "dbY"),
+      quiet = TRUE
+    ) %>% as_date()
+  }
+  
+  return(out)
 }
 
 make_inter_long <- function(fname, var) {
-  read_csv(file.path(met_dir, fname), show_col_types = FALSE) %>%
-    mutate(DATE = parse_my_date(DATE)) %>%
+  raw <- read_csv(file.path(met_dir, fname), show_col_types = FALSE) %>%
+    mutate(DATE = parse_my_date(DATE))
+  
+  long <- raw %>%
     pivot_longer(
-      cols         = ends_with("_inter"),
-      names_to     = "SITECODE",
-      names_pattern= "(.*)_inter$",     
-      values_to    = var                
+      cols           = ends_with("_inter"),
+      names_to       = "SITECODE",
+      names_pattern  = "(.*)_inter$",
+      values_to      = var,
+      values_drop_na = TRUE    # keep true zeros, only drop actual NAs
     )
+  
+  all_dates     <- seq.Date(min(raw$DATE, na.rm = TRUE),
+                            max(raw$DATE, na.rm = TRUE),
+                            by = "day")
+  station_names <- unique(long$SITECODE)
+  
+  expand_grid(DATE = all_dates, SITECODE = station_names) %>%
+    left_join(long, by = c("DATE", "SITECODE")) %>%
+    arrange(SITECODE, DATE)
 }
 
 read_mack_precip <- function(fname) {
@@ -660,7 +700,6 @@ constrain_interpolated_values <- function(data) {
 }
 
 # Function to process all pairs, triplets and interpolate data
-# Function to process all pairs, triplets and interpolate data
 process_station_groups <- function(data, station_groups, variables) {
   # First process all the pairs
   interpolated_data <- data
@@ -1225,6 +1264,8 @@ Temp <- Temp %>%
   dplyr::rename(T_C = Temp)
 
 # Load precipitation data
+Precip_raw <- read_csv(file.path(met_dir, "Precipitation_original_&_filled_1979_2023.csv"))
+
 Precip <- make_inter_long("Precipitation_original_&_filled_1979_2023.csv",  "Precip")
 Precip <- Precip %>%
   dplyr::select(DATE, SITECODE, Precip) %>%
@@ -1419,8 +1460,64 @@ all_watersheds_data <- all_watersheds_data %>%
 # Write the watersheds data to files (NOT the met station data)
 write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_data_q.csv"))
 
-# # Write individual watershed files with VPD
+# Write individual watershed files with VPD
 # for (site_name in names(watershed_datasets)) {
-#   write_csv(watershed_datasets[[site_name]], 
+#   write_csv(watershed_datasets[[site_name]],
 #             file.path(output_dir, "data", paste0(site_name, "_met_data_q.csv")))
 # }
+
+# ---- 5. Report Met Stations Used per Watershed and Variable ----
+
+# Define the mapping of variables clearly
+variable_station_mapping <- lapply(site_mapping, function(vars) {
+  list(
+    Temperature = vars$temp,
+    Precipitation = vars$precip,
+    Relative_Humidity = vars$rh,
+    Net_Radiation = vars$netrad,
+    VPD = vars$temp, # VPD is calculated from temperature & RH stations (same as temp here)
+    Discharge = "Gauge station" # Explicitly state discharge data origin
+  )
+})
+
+# Convert to a readable dataframe
+station_usage_df <- do.call(rbind, lapply(names(variable_station_mapping), function(site) {
+  vars <- variable_station_mapping[[site]]
+  data.frame(
+    SITECODE = site,
+    Temperature = paste(vars$Temperature, collapse = ", "),
+    Precipitation = paste(vars$Precipitation, collapse = ", "),
+    Relative_Humidity = paste(vars$Relative_Humidity, collapse = ", "),
+    Net_Radiation = paste(vars$Net_Radiation, collapse = ", "),
+    VPD = paste(vars$VPD, collapse = ", "),
+    Discharge = vars$Discharge,
+    stringsAsFactors = FALSE
+  )
+}))
+
+# Save this mapping to a CSV for reference
+write_csv(station_usage_df, file.path(output_dir, "data", "watershed_met_station_usage.csv"))
+
+# ---- ADD MET STATION COLUMNS TO FINAL OUTPUT ----
+
+# First, create a tidy dataframe from the site_mapping for easy joining
+station_columns <- site_mapping %>%
+  purrr::imap_dfr(~ data.frame(
+    SITECODE = .y,
+    Temp_stations = paste(.x$temp, collapse = ", "),
+    Precip_stations = paste(.x$precip, collapse = ", "),
+    RH_stations = paste(.x$rh, collapse = ", "),
+    NetRad_stations = paste(.x$netrad, collapse = ", "),
+    VPD_stations = paste(unique(c(.x$temp, .x$rh)), collapse = ", "), # both temp and RH stations
+    Discharge_stations = "Gauge station",
+    stringsAsFactors = FALSE
+  ))
+
+# Now join this back to your final all_watersheds_data
+all_watersheds_data <- all_watersheds_data %>%
+  left_join(station_columns, by = "SITECODE")
+
+# Write the updated dataset
+write_csv(all_watersheds_data, file.path(output_dir, "data", "watersheds_met_data_q_with_stations.csv"))
+
+
