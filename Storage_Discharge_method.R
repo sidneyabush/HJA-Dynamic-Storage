@@ -189,3 +189,27 @@ ggplot(annual_vol, aes(x = wateryear, y = S_annual_mm, color = site, group = sit
     color = "Site"
   ) +
   theme_minimal()
+
+# reshape to long format
+annual_long <- annual_vol %>%
+  select(site, wateryear, S_annual_mm, S_high_med_mm, S_med_low_mm) %>%
+  pivot_longer(
+    cols = starts_with("S_"),
+    names_to  = "metric",
+    values_to = "storage_mm"
+  )
+
+# facet by metric
+ggplot(annual_long, aes(x = wateryear, y = storage_mm, color = site)) +
+  geom_line() +
+  facet_wrap(~ metric, scales = "free_y") +
+  labs(x = "Water Year", y = "Storage (mm)", color = "Site") +
+  theme_minimal()
+
+ggplot(annual_long, aes(x = wateryear, y = storage_mm, 
+                        linetype = metric, color = metric)) +
+  geom_line() +
+  facet_wrap(~ site) +
+  labs(x = "Water Year", y = "Storage (mm)") +
+  theme_classic()
+

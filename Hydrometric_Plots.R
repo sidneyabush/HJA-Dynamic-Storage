@@ -239,5 +239,5 @@ ggsave(
   "grid_all_methods.png",
   plot  = p_grid,
   path  = output_dir,
-  width = 11, height = 12.5, units = "in", dpi = 300
+  width = 9, height = 11, units = "in", dpi = 300
 )
