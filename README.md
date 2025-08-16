@@ -1,21 +1,23 @@
-# HJA Dynamic Storage
 
+### Folder details
 
-## Structure: 
+- **[`Create_Master_Hydrometric_Dataset/`](Create_Master_Hydrometric_Dataset/)**  
+  A *comprehensive* workflow that harmonizes meteorology and streamflow for ET calculations and downstream analyses.
 
-* Create_Master_Hydrometric_Dataset
-  * a (very long) workflow that combines all meteorological, streamflow data for use in ET calcs and later in other steps.
-* Discharge_metrics/
-  * Q-based metrics [RBI flashiness, recession slope, storage-discharge method ((Kirchner–Staudinger)].
-* ET_calculations/
-  * ET estimation using and combining multiple methods (see below)
-* Plots/
-  * figure scripts
-* Prior_analyses/
-  * archived scripts from earlier phases (e.g., proposal writing, initial CQ analysis)
-* deprecated/
-  * old scripts kept for reference
+- **[`Discharge_metrics/`](Discharge_metrics/)**  
+  Q-based indicators including:
+  - **RBI (flashiness)**
+  - **Recession curve slope** (log–log slope of −dQ/dt vs. Q)
+  - **Dynamic (active) storage** using the storage–discharge (Kirchner–Staudinger) approach
 
----
+- **[`ET_calculations/`](ET_calculations/)**  
+  Evapotranspiration estimation using multiple methods and combined summaries
+  
+- **[`Plots/`](Plots/)**  
+  Scripts to generate figures for exploration and publication.
 
+- **[`Prior_analyses/`](Prior_analyses/)**  
+  Archived notebooks/scripts from early project stages (e.g., proposal writing, initial concentration–discharge exploration).
 
+- **[`deprecated/`](deprecated/)**  
+  Old or replaced scripts retained for traceability.
