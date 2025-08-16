@@ -25,7 +25,7 @@
 ## Workflow details
 ## Hydromet harmonization & interpolation (highlights)
 
-Builds **daily, site-level meteorology** for each watershed and attaches **discharge**. Focus here is on how multi-station data are combined and the guardrails applied.
+Builds **daily, site-level meteorology** for each watershed and attaches **discharge**. Focus here is on how multi-station data are combined.
 
 ### How data are combined
 
