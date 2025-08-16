@@ -62,7 +62,6 @@ Builds **daily, site-level meteorology** for each watershed and attaches **disch
 
 ### Assumptions & thresholds
 
-- **Date parsing:** tolerant to ISO/US/EU and **Excel serials**.
 - **Minimum overlap:** pairs **≥ 5** days; triplets **≥ 10** days.
 - **Duplicates:** duplicate `DATE × SITECODE` rows are **averaged** before modeling.
 - **Physical constraints:** cap **RH ≤ 100%**; set **precip ≥ 0**.
