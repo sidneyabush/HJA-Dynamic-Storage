@@ -1406,7 +1406,7 @@ gslook_q_full <- discharge %>%
   filter(SITECODE == "GSLOOK") %>%
   left_join(da_df, by = "SITECODE") %>%
   mutate(
-    # convert m³/s to mm/day: 1 m³/s = 0.0283168 m³/s → mm/day over DA_M2
+    # convert m3/s to mm/day: 1 m3/s = 0.0283168 m3/s = mm/day over DA_M2
     Q_mm_d   = MEAN_Q * 0.0283168 * 86400 / DA_M2,
     SITECODE = "GSLOOK_FULL"
   ) %>%
@@ -1431,7 +1431,7 @@ all_watersheds_data <- bind_rows(
 ) %>%
   # merge the two Q_mm_d variants into one
   mutate(
-    Q_mm_d = coalesce(Q_mm_d.x, Q_mm_d)      # if you also had a Q_mm_d.y, you can do coalesce(Q_mm_d.x, Q_mm_d.y, Q_mm_d)
+    Q_mm_d = coalesce(Q_mm_d.x, Q_mm_d)      
   ) %>%
   # drop the leftover suffixed column(s)
   select(-Q_mm_d.x, -Q_mm_d.y)
