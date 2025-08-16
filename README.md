@@ -1,5 +1,5 @@
 
-### Folder details
+# Folder details
 
 - **[`Create_Master_Hydrometric_Dataset/`](Create_Master_Hydrometric_Dataset/)**  
   A *comprehensive* workflow that harmonizes meteorology and streamflow for ET calculations and downstream analyses.
@@ -22,7 +22,7 @@
 - **[`deprecated/`](deprecated/)**  
   Old or replaced scripts retained for traceability.
 
-## Workflow details
+# Workflow details
 ## Hydromet harmonization & interpolation (highlights)
 
 Builds **daily, site-level meteorology** for each watershed and attaches **discharge**. Focus here is on how multi-station data are combined.
@@ -46,19 +46,12 @@ Builds **daily, site-level meteorology** for each watershed and attaches **disch
 - Predict missing days **only** for the single missing station in each case.
 - If triplet overlap is insufficient, **fall back** to pairwise interpolation.
 
-**Roll-up to watershed**
+**Scale-up to watershed**
 - After interpolation, if multiple stations are mapped for a watershed/variable, take the **daily average** across mapped stations to produce the **site-ready** series.
 
 **Composite site (GSLOOK_FULL)**
 - **Met variables:** daily average of component watersheds (`GSWS01`, `GSWS06`, `LONGER`, `COLD`).
 - **Discharge:** computed from raw `GSLOOK` records and drainage area, then joined to the composite.
-
-**Discharge units**
-- Convert to depth over area:
-  \[
-  Q_{\text{mm d}^{-1}} = \text{MEAN\_Q} \times 0.0283168 \times 86400 \,/\, \text{DA\_M2} \times 1000
-  \]
-  *Assumes `MEAN_Q` is in **cfs**. Adjust the factor if in m³ s⁻¹.*
 
 ### Assumptions & thresholds
 
@@ -71,5 +64,50 @@ Builds **daily, site-level meteorology** for each watershed and attaches **disch
 ### Outputs (where to look)
 - Master, site-level table: `.../05_Outputs/MET/data/watersheds_met_data_q.csv`
 - QA plots (pair/triplet fits, time series): `.../05_Outputs/MET/plots/`
+
+### Outputs
+- **Master table:** watershed-level daily `P`, `Q`, `ET` (mm/day).  
+- **QA figures:** pair/triplet fit plots (with R² and 1:1 line) and per-site time series.
+
+## ET_calculations
+
+Produce **daily, watershed-level ET** and a **joined water-balance table** for downstream storage analysis.
+
+### Purpose
+- Compute ET from gap-filled meteorology (station → watershed).
+- Use a **Hamon** formulation with a **Zhang-style calibrated coefficient** (smoothed/interpolated).
+- Assemble `P (mm d⁻¹)`, `Q (mm d⁻¹)`, and `ET (mm d⁻¹)` into a single daily table.
+
+### Inputs
+- Harmonized, gap-filled met at watershed level: `T_C`, `P_mm_d`, `RH_d_pct`, `NR_Wm2_d`.
+- Discharge converted to depth over drainage area: `Q_mm_d`.
+- Site-station mapping from the harmonization step (e.g., single / pair / triplet).
+
+### Workflow (what happens)
+1. **Load gap-filled met** (already mapped + averaged from stations to watershed).
+2. **Compute VPD (kPa)** from filled `T_C` and `RH_d_pct`.
+3. **PET (Hamon + Zhang calibration)**  
+   - Calculate daily Hamon PET.  
+   - Apply a **calibration coefficient** (Zhang-style) and **interpolate** that coefficient across time to avoid step changes.
+4. **Select ET series**  
+   - Use the calibrated Hamon PET as **ET (mm d⁻¹)** for the master table.
+5. **Assemble daily water balance**  
+   - Join `P_mm_d`, `Q_mm_d`, and `ET_mm_d` by `DATE × SITECODE`.
+6. *(Optional diagnostic)* Export QA plots comparing ET and showing per-site series.
+
+### Key ET calculation:
+- Hamon PET scaled by a **Zhang-calibrated coefficient** (time-interpolated), producing **ET (mm d⁻¹)**.
+
+### Assumptions
+- Station-watershed combining happens **before** ET:  
+  **pairs ≥ 5 overlap (OLS with inverse back-prediction), triplets ≥ 10 overlap (multiple regression);** then daily **averaging** across mapped stations.  
+- **Physical caps:** `RH ≤ 100%`, `P ≥ 0`.  
+- **VPD** computed **after** interpolation so ET uses the same filled T & RH.  
+
+### Outputs
+- **Daily water-balance with ET:** `.../DynamicStorage/daily_water_balance_ET_Hamon-Zhang_coeff_interp.csv`  
+- **QA plots (optional):** `.../05_Outputs/MET/plots/` (pair/triplet fits, per-site time series)
+
+
 
 
