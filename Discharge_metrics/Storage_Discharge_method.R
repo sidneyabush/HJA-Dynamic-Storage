@@ -1,7 +1,6 @@
-# ──────────────────────────────────────────────────────────────────────────────
-# Dynamic Storage: Overall + Annual per Site (water-year)
-# (excluding COLD, LONGER, GSWSMC, GSMACK; outputs in mm and m³)
-# ──────────────────────────────────────────────────────────────────────────────
+# =============================================================================
+# Dynamic Storage: Overall + Annual per Site 
+# =============================================================================
 
 # 0) Load libraries & clear environment
 library(dplyr)
