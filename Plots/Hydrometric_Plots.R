@@ -39,7 +39,7 @@ axis_labels <- c(
   Q5norm                = "Normalized Q5",
   CV_Q5norm             = "Normalized CV_Q5",
   RBI                   = "Richards–Baker Index",
-  recession_curve_slope = "Recession Curve Slope",
+  recession_curve_slope = "Recession-curve Slope",
   S_annual_mm           = "DS Storage-Discharge",
   DS_sum                = "DS Drawdown"
 )
