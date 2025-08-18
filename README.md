@@ -17,10 +17,10 @@
   Scripts to generate figures for exploration and publication.
 
 - **[`Prior_analyses/`](Prior_analyses/)**  
-  Archived notebooks/scripts from early project stages (e.g., proposal writing, initial concentration–discharge exploration).
+  Archived scripts from early project stages (e.g., proposal writing, initial concentration–discharge exploration).
 
 - **[`deprecated/`](deprecated/)**  
-  Old or replaced scripts retained for traceability.
+  Old or replaced scripts retained for reference.
 
 # Workflow details
 ## Hydromet harmonization & interpolation (highlights)
