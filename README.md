@@ -61,7 +61,7 @@ Builds **daily, site-level meteorology** for each watershed and attaches **disch
 - **VPD:** computed **after** interpolation from T and RH so it reflects gap-filled inputs.
 - **Drainage areas:** read from `drainage_area.csv`; consistent station recodes (e.g., `GSWSMC → GSMACK`) applied prior to joins.
 
-### Outputs (where to look)
+### Outputs 
 - Master, site-level table: `.../05_Outputs/MET/data/watersheds_met_data_q.csv`
 - QA plots (pair/triplet fits, time series): `.../05_Outputs/MET/plots/`
 
@@ -83,7 +83,7 @@ Produce **daily, watershed-level ET** and a **joined water-balance table** for d
 - Discharge converted to depth over drainage area: `Q_mm_d`.
 - Site-station mapping from the harmonization step (e.g., single / pair / triplet).
 
-### Workflow (what happens)
+### Workflow 
 1. **Load gap-filled met** (already mapped + averaged from stations to watershed).
 2. **Compute VPD (kPa)** from filled `T_C` and `RH_d_pct`.
 3. **PET (Hamon + Zhang calibration)**  
