@@ -1,7 +1,7 @@
 
 # Folder details
 
-- **[`Create_Master_Hydrometric_Dataset/`](Create_Master_Hydrometric_Dataset/)**  
+- **[`Create_Master_Hydrometric_Dataset/`](Create_Master_Hydrometric_Dataset.R/)**  
   A *comprehensive* workflow that harmonizes meteorology and streamflow for ET calculations and downstream analyses.
 
 - **[`Discharge_metrics/`](Discharge_metrics/)**  
