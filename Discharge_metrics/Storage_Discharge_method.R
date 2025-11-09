@@ -52,10 +52,12 @@ compute_fdc <- function(Q) {
   exc  <- (r - 0.44) / (n + 0.12) * 100
   tibble(exceedance = exc, Q = Qs)
 }
+
 get_Q <- function(fdc, P_exc) {
   if (nrow(fdc) < 2) return(NA_real_)
   approx(fdc$exceedance, fdc$Q, xout = P_exc)$y
 }
+
 deltaS <- function(Qu, Ql, k, p) {
   (Qu^(2 - p) - Ql^(2 - p)) / (k * (2 - p))
 }
